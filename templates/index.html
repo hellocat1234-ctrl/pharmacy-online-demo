@@ -1,31 +1,77 @@
 {% extends "base.html" %}
+{% block title %}Pharmacy Online - เลือกบทบาท{% endblock %}
+{% block body_class %}bg-[#F0F7F7] font-sans{% endblock %}
+{% block main_class %}flex-1 flex flex-col justify-center items-center px-4 sm:px-6 py-10 lg:py-16{% endblock %}
 {% block content %}
-<h3 class="mb-4">เลือกบทบาท (บัญชีทดสอบ)</h3>
-<div class="row g-4">
-  <div class="col-md-6">
-    <div class="card border-primary h-100">
-      <div class="card-header bg-primary text-white">คนไข้</div>
-      <form class="card-body" method="get" action="{{ url_for('enter') }}">
-        <input type="hidden" name="role" value="patient">
-        <select class="form-select mb-3" name="id">
-          {% for p in patients %}<option value="{{ p.patient_id }}">{{ p.full_name }}{{ " (VIP)" if p.is_vip }}</option>{% endfor %}
-        </select>
-        <button class="btn btn-primary">เข้าใช้งานเป็นคนไข้</button>
-      </form>
+<div class="w-full max-w-4xl mx-auto">
+  <div class="text-center mb-10 sm:mb-12">
+    <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-teal-50 border border-teal-100 text-[#00A884] mb-3 shadow-inner">
+      <svg class="w-9 h-9" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M10.5 4a1.5 1.5 0 0 0-3 0v4.5H3a1.5 1.5 0 0 0 0 3h4.5V16a1.5 1.5 0 0 0 3 0v-4.5H15a1.5 1.5 0 0 0 0-3h-4.5V4z"></path>
+        <path d="M19.5 8a1.5 1.5 0 0 0-1.5 1.5V11h-1.5a1.5 1.5 0 0 0 0 3H18v1.5a1.5 1.5 0 0 0 3 0V14h1.5a1.5 1.5 0 0 0 0-3H21V9.5A1.5 1.5 0 0 0 19.5 8z" opacity="0.6"></path>
+      </svg>
     </div>
+    <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-800 tracking-tight">Pharmacy Online</h1>
+    <p class="mt-2 text-sm sm:text-base text-slate-500 font-medium">ปรึกษาเภสัชกร สะดวก ปลอดภัย ใกล้คุณ</p>
   </div>
-  <div class="col-md-6">
-    <div class="card border-success h-100">
-      <div class="card-header bg-success text-white">เภสัชกร</div>
-      <form class="card-body" method="get" action="{{ url_for('enter') }}">
-        <input type="hidden" name="role" value="pharmacist">
-        <select class="form-select mb-3" name="id">
-          {% for f in pharmacists %}<option value="{{ f.pharmacist_id }}">{{ f.full_name }} ({{ f.pharmacy_name }})</option>{% endfor %}
-        </select>
-        <button class="btn btn-success">เข้าใช้งานเป็นเภสัชกร</button>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 items-stretch mb-8">
+    <!-- คนไข้ -->
+    <section aria-labelledby="role-patient-title" class="role-card bg-white rounded-2xl p-6 sm:p-8 border border-slate-200/80 shadow-md shadow-slate-100 flex flex-col items-center text-center">
+      <div class="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-teal-50 border-2 border-teal-200/70 flex items-center justify-center text-[#00A884] mb-4">
+        <svg class="w-12 h-12" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+          <path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+      </div>
+      <span class="text-xs sm:text-sm font-normal text-slate-500">เข้าใช้งานเป็น</span>
+      <h2 class="text-xl sm:text-2xl font-bold text-slate-800 mt-0.5 mb-6" id="role-patient-title">คนไข้</h2>
+      <form class="w-full flex-1 flex flex-col justify-between space-y-4" method="get" action="{{ url_for('enter') }}">
+        <input type="hidden" name="role" value="patient">
+        <div class="w-full text-left">
+          <label class="sr-only" for="select-patient">เลือกชื่อผู้ป่วย</label>
+          <div class="relative">
+            <select class="w-full appearance-none bg-none bg-slate-50 border border-slate-300 text-slate-700 text-sm sm:text-base rounded-xl py-3 px-4 pr-10 focus:outline-none focus:ring-2 focus:ring-[#00A884] focus:border-[#00A884] transition-all cursor-pointer" id="select-patient" name="id" required>
+              <option disabled selected value="">เลือกชื่อผู้ป่วย</option>
+              {% for p in patients %}<option value="{{ p.patient_id }}">{{ p.full_name }}{{ " (VIP)" if p.is_vip }}</option>{% endfor %}
+            </select>
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-slate-400">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </div>
+          </div>
+        </div>
+        <button class="w-full py-3.5 px-6 rounded-xl bg-[#00A884] hover:bg-[#008f70] active:scale-[0.99] text-white font-medium text-base shadow-md shadow-teal-500/20 transition-all focus:outline-none focus:ring-2 focus:ring-[#00A884]/40" type="submit">เข้าใช้งานเป็นคนไข้</button>
       </form>
-    </div>
+    </section>
+
+    <!-- เภสัชกร -->
+    <section aria-labelledby="role-pharmacist-title" class="role-card bg-white rounded-2xl p-6 sm:p-8 border border-slate-200/80 shadow-md shadow-slate-100 flex flex-col items-center text-center">
+      <div class="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-blue-50 border-2 border-blue-200/70 flex items-center justify-center text-blue-600 mb-4">
+        <svg class="w-12 h-12" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+          <path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M4.5 20.118a7.5 7.5 0 0115 0" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M9 14.25v2.25a3 3 0 006 0v-2.25" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="15" cy="16.5" fill="currentColor" r="1.2"></circle>
+        </svg>
+      </div>
+      <span class="text-xs sm:text-sm font-normal text-slate-500">เข้าใช้งานเป็น</span>
+      <h2 class="text-xl sm:text-2xl font-bold text-slate-800 mt-0.5 mb-6" id="role-pharmacist-title">เภสัชกร</h2>
+      <form class="w-full flex-1 flex flex-col justify-between space-y-4" method="get" action="{{ url_for('enter') }}">
+        <input type="hidden" name="role" value="pharmacist">
+        <div class="w-full text-left">
+          <label class="sr-only" for="select-pharmacist">เลือกชื่อเภสัชกร</label>
+          <div class="relative">
+            <select class="w-full appearance-none bg-none bg-slate-50 border border-slate-300 text-slate-700 text-sm sm:text-base rounded-xl py-3 px-4 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all cursor-pointer" id="select-pharmacist" name="id" required>
+              <option disabled selected value="">เลือกชื่อเภสัชกร</option>
+              {% for f in pharmacists %}<option value="{{ f.pharmacist_id }}">ภก. {{ f.full_name }}</option>{% endfor %}
+            </select>
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-slate-400">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </div>
+          </div>
+        </div>
+        <button class="w-full py-3.5 px-6 rounded-xl bg-[#1E88E5] hover:bg-[#1976D2] active:scale-[0.99] text-white font-medium text-base shadow-md shadow-blue-500/20 transition-all focus:outline-none focus:ring-2 focus:ring-blue-400/40" type="submit">เข้าใช้งานเป็นเภสัชกร</button>
+      </form>
+    </section>
   </div>
 </div>
-<p class="text-muted mt-4">เปิดหลายหน้าต่างได้: คนไข้ 1 หน้าต่าง และเภสัชกรคนละหน้าต่าง</p>
 {% endblock %}

@@ -1,6 +1,9 @@
 // ห้องแชทแบบ polling : ถามข้อความใหม่ (message_id > ตัวล่าสุดที่มี) ทุก 1.5 วินาที
 // สถานะห้อง (state) มาจากเซิร์ฟเวอร์ : waiting_reply, consulting, closed, failed
+// ตัวนับเวลา : เซิร์ฟเวอร์ส่ง turn (ฝ่ายที่ต้องตอบ) และ seconds_left ซึ่งคำนวณจากข้อความล่าสุด
+//             จึงรีเซ็ตเองเมื่อมีข้อความใหม่ ระหว่างรอบ polling หน้าเว็บลดเลขเองทุกวินาที
 const STATE_BADGE = { waiting_reply: "bg-warning text-dark", consulting: "bg-success", failed: "bg-danger", closed: "bg-secondary" };
+const SIDE_LABEL = { pharmacist: "เภสัชกร", patient: "คนไข้" };
 
 function startChat(cfg) {
   const byId = (id) => document.getElementById(id);
@@ -9,6 +12,9 @@ function startChat(cfg) {
   const input = byId("chat-input");
   let lastId = 0;
   let busy = false;
+  let turn = null;        // ฝ่ายที่ต้องตอบ
+  let secondsLeft = null; // เวลาที่เหลือของฝ่ายนั้น
+  let rejectReason = null; // ข้อความจากเซิร์ฟเวอร์เมื่อส่งข้อความไม่ผ่าน
 
   function addMessage(m) {
     const div = document.createElement("div");
@@ -18,6 +24,17 @@ function startChat(cfg) {
     time.textContent = (m.sender_type === "pharmacist" ? "เภสัชกร" : "คนไข้") + " · " + m.sent_at;
     div.appendChild(time);
     box.appendChild(div);
+  }
+
+  // ฝ่ายที่ต้องตอบเห็น "ต้องตอบภายใน mm:ss" อีกฝ่ายเห็น "รอ[เภสัชกร/คนไข้]ตอบกลับ mm:ss"
+  function drawTimer() {
+    if (turn === null) return;
+    const mine = turn === cfg.role;
+    byId("reply-timer").classList.toggle("timer-mine", mine);
+    byId("reply-label").textContent = mine ? "ต้องตอบภายใน" : "รอ" + SIDE_LABEL[turn] + "ตอบกลับ";
+    byId("reply-countdown").textContent = formatCountdown(secondsLeft);
+    byId("expire-side").value = turn;
+    byId("expire-button").textContent = "ทดสอบ: " + SIDE_LABEL[turn] + "หมดเวลา";
   }
 
   async function poll() {
@@ -39,17 +56,17 @@ function startChat(cfg) {
       form.classList.toggle("d-none", !open);
       const closed = byId("chat-closed");
       closed.classList.toggle("d-none", open);
-      closed.textContent = data.state === "failed"
+      closed.textContent = rejectReason || (data.state === "failed"
         ? "ให้คำปรึกษาไม่สำเร็จ: เภสัชกรไม่ตอบภายใน 10 นาที ห้องแชทถูกปิด"
-        : "การปรึกษาจบแล้ว ห้องแชทถูกปิด";
+        : "การปรึกษาจบแล้ว ห้องแชทถูกปิด");
 
-      if (cfg.role === "pharmacist") {
-        // ตัวนับเวลา 10 นาที แสดงเฉพาะตอนรอตอบกลับ
-        const waiting = data.state === "waiting_reply";
-        byId("reply-timer").classList.toggle("d-none", !waiting);
-        if (waiting) byId("reply-countdown").textContent = formatCountdown(data.seconds_left);
-        byId("close-form").classList.toggle("d-none", !open);
-      }
+      // ตัวนับเวลาและปุ่มทดสอบ แสดงเฉพาะตอนห้องยังเปิด ค่าจากเซิร์ฟเวอร์ทับค่าที่นับเองทุกรอบ
+      byId("reply-timer").classList.toggle("d-none", !open);
+      byId("expire-form").classList.toggle("d-none", !open);
+      turn = open ? data.turn : null;
+      secondsLeft = open ? data.seconds_left : null;
+      drawTimer();
+      if (cfg.role === "pharmacist") byId("close-form").classList.toggle("d-none", !open);
 
       if (data.prescription_id) {
         if (cfg.role === "patient") {
@@ -71,14 +88,24 @@ function startChat(cfg) {
     const content = input.value.trim();
     if (!content) return;
     input.value = "";
-    await fetch(cfg.messagesUrl, {
+    const res = await fetch(cfg.messagesUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sender_type: cfg.role, content: content }),
     });
+    if (!res.ok) {
+      // เซิร์ฟเวอร์ปฏิเสธ (เช่น หมดเวลาแล้ว) : แสดงเหตุผลแทนช่องพิมพ์ รอบ polling ถัดไปจะปิดห้องให้
+      rejectReason = (await res.json()).error;
+    }
     poll();
   });
 
   poll();
   setInterval(poll, 1500);
+  setInterval(() => {
+    if (secondsLeft !== null) {
+      secondsLeft -= 1;
+      drawTimer();
+    }
+  }, 1000);
 }

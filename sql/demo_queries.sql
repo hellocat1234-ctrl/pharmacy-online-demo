@@ -17,20 +17,34 @@ ORDER  BY q.queue_id;
 -- 2) ห้องแชท : ระบบสร้างและจับคู่เภสัชกรให้อัตโนมัติ (คิว 1 - 1 ห้องแชท)
 --    DDL เก็บ status ได้แค่ open / closed  สถานะตามรายงาน (chat_state) คำนวณจาก
 --    status ของห้อง + มีข้อความจากเภสัชกรหรือยัง + สถานะคิว
-SELECT c.chat_id, c.queue_id, f.first_name AS pharmacist, c.status,
-       CASE WHEN c.status = 'open' AND EXISTS (SELECT 1 FROM chat_message m
-                                               WHERE  m.chat_id = c.chat_id AND m.sender_type = 'pharmacist')
-                 THEN 'ระหว่างปรึกษา'
-            WHEN c.status = 'open'      THEN 'รอตอบกลับ'
-            WHEN q.status = 'cancelled' THEN 'ให้คำปรึกษาไม่สำเร็จ'
-            ELSE 'ปิดห้องแชทแล้ว'
-       END AS chat_state,
-       TO_CHAR(c.started_at, 'HH24:MI:SS') AS started_at,
-       TO_CHAR(c.started_at + INTERVAL '10' MINUTE, 'HH24:MI:SS') AS reply_deadline
-FROM   chat_room c
-       JOIN consult_queue q ON q.queue_id = c.queue_id
-       JOIN pharmacist f    ON f.pharmacist_id = c.pharmacist_id
-ORDER  BY c.chat_id;
+--    ตัวนับเวลาคำนวณจากข้อความล่าสุดของห้อง :
+--      ข้อความล่าสุดมาจากคนไข้ (หรือยังไม่มีข้อความ) -> เภสัชกรต้องตอบภายใน 10 นาที
+--      ข้อความล่าสุดมาจากเภสัชกร                  -> คนไข้ต้องตอบภายใน 5 นาที
+SELECT x.chat_id, x.queue_id, x.pharmacist, x.status, x.chat_state,
+       CASE WHEN x.status = 'open' THEN x.turn END AS must_reply,
+       TO_CHAR(x.timer_start, 'HH24:MI:SS') AS timer_start,
+       CASE WHEN x.status = 'open' THEN
+            TO_CHAR(x.timer_start + NUMTODSINTERVAL(CASE x.turn WHEN 'pharmacist' THEN 10 ELSE 5 END, 'MINUTE'),
+                    'HH24:MI:SS') END AS reply_deadline
+FROM  (SELECT c.chat_id, c.queue_id, f.first_name AS pharmacist, c.status,
+              CASE WHEN c.status = 'open' AND EXISTS (SELECT 1 FROM chat_message m
+                                                      WHERE  m.chat_id = c.chat_id AND m.sender_type = 'pharmacist')
+                        THEN 'ระหว่างปรึกษา'
+                   WHEN c.status = 'open'      THEN 'รอตอบกลับ'
+                   WHEN q.status = 'cancelled' THEN 'ให้คำปรึกษาไม่สำเร็จ'
+                   ELSE 'ปิดห้องแชทแล้ว'
+              END AS chat_state,
+              NVL((SELECT CASE m.sender_type WHEN 'pharmacist' THEN 'patient' ELSE 'pharmacist' END
+                   FROM   chat_message m
+                   WHERE  m.message_id = (SELECT MAX(m2.message_id) FROM chat_message m2
+                                          WHERE  m2.chat_id = c.chat_id)), 'pharmacist') AS turn,
+              NVL((SELECT m.sent_at FROM chat_message m
+                   WHERE  m.message_id = (SELECT MAX(m2.message_id) FROM chat_message m2
+                                          WHERE  m2.chat_id = c.chat_id)), c.started_at) AS timer_start
+       FROM   chat_room c
+              JOIN consult_queue q ON q.queue_id = c.queue_id
+              JOIN pharmacist f    ON f.pharmacist_id = c.pharmacist_id) x
+ORDER  BY x.chat_id;
 
 -- 2.1) ภาระงานของเภสัชกร : ถือห้อง open ได้คนละ 1 ห้อง (MAX_OPEN_CHATS)
 --      การจับคู่เลือกคนที่ open_chats น้อยที่สุด ถ้าทุกคนเต็ม คิวใหม่จะรอจับคู่

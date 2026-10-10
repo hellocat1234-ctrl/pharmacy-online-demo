@@ -8,7 +8,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, url
 
 import db
 import transactions as tx
-from transactions import CHAT_STATE_SQL, QUEUE_ORDER_SQL, SECONDS_LEFT_SQL, DemoError
+from transactions import CHAT_STATE_SQL, QUEUE_ORDER_SQL, SECONDS_LEFT_SQL, TURN_SQL, DemoError
 
 app = Flask(__name__)
 
@@ -56,7 +56,7 @@ def get_chat(chat_id):
     """ห้องแชท + คิว + ชื่อทั้งสองฝ่าย + ใบสั่งยาของห้องนี้ (ถ้าออกแล้ว)"""
     chat = db.query_one(f"""
         SELECT c.chat_id, c.status, c.pharmacist_id, q.patient_id, q.queue_no,
-               {CHAT_STATE_SQL} AS state, {SECONDS_LEFT_SQL} AS seconds_left,
+               {CHAT_STATE_SQL} AS state, {TURN_SQL} AS turn, {SECONDS_LEFT_SQL} AS seconds_left,
                p.first_name || ' ' || p.last_name AS patient_name,
                f.first_name || ' ' || f.last_name AS pharmacist_name,
                ph.name AS pharmacy_name, r.prescription_id
@@ -167,7 +167,8 @@ def pharmacist_home_data(pharmacist):
     return db.query(f"""
         SELECT c.chat_id, q.queue_no, p.first_name || ' ' || p.last_name AS patient_name,
                p.chronic_disease, TO_CHAR(c.started_at, 'HH24:MI:SS') AS started_at,
-               {CHAT_STATE_SQL} AS state, {SECONDS_LEFT_SQL} AS seconds_left, r.prescription_id
+               c.status, {CHAT_STATE_SQL} AS state, {TURN_SQL} AS turn, {SECONDS_LEFT_SQL} AS seconds_left,
+               r.prescription_id
         FROM   chat_room c
                JOIN consult_queue q ON q.queue_id = c.queue_id
                JOIN patient p       ON p.patient_id = q.patient_id
@@ -355,14 +356,34 @@ def pharmacist_close_chat(phid, chat_id):
     return redirect(url_for("pharmacist_home", phid=phid))
 
 
+def expire_side(default):
+    """ฝ่ายที่ปุ่มทดสอบสั่งให้หมดเวลา : หน้าแชทส่ง side = ฝ่ายที่ต้องตอบอยู่ตอนนั้น"""
+    side = request.form.get("side", default)
+    return side if side in ("pharmacist", "patient") else default
+
+
+SIDE_TH = {"pharmacist": "เภสัชกร", "patient": "คนไข้"}
+
+
 @app.post("/pharmacist/<int:phid>/chat/<int:chat_id>/expire")
 def pharmacist_expire_chat(phid, chat_id):
-    """ปุ่มทดสอบ : จำลองว่าครบ 10 นาทีแล้วเภสัชกรยังไม่ตอบ (ไม่ต้องรอจริงตอน Demo)"""
+    """ปุ่มทดสอบ : จำลองว่าฝ่ายที่ต้องตอบหมดเวลาแล้ว (ไม่ต้องรอจริงตอน Demo)"""
     if get_chat(chat_id)["pharmacist_id"] != phid:
         abort(404)
-    if tx.expire_unanswered(chat_id) == 0:
-        return render_pharmacist_home(phid, error="ห้องนี้เภสัชกรตอบแล้วหรือปิดไปแล้ว จึงไม่นับว่าหมดเวลา")
+    side = expire_side("pharmacist")
+    if tx.expire_overdue(chat_id, side) == 0:
+        return render_pharmacist_home(
+            phid, error=f"ห้องนี้ปิดไปแล้ว หรือตอนนี้ไม่ใช่ฝ่าย{SIDE_TH[side]}ที่ต้องตอบ จึงไม่นับว่าหมดเวลา")
     return redirect(url_for("pharmacist_home", phid=phid))
+
+
+@app.post("/patient/<int:pid>/chat/<int:chat_id>/expire")
+def patient_expire_chat(pid, chat_id):
+    """ปุ่มทดสอบฝั่งคนไข้ : ใช้กติกาเดียวกับฝั่งเภสัชกร"""
+    if get_chat(chat_id)["patient_id"] != pid:
+        abort(404)
+    tx.expire_overdue(chat_id, expire_side("patient"))
+    return redirect(url_for("patient_chat", pid=pid, chat_id=chat_id))
 
 
 def render_pharmacist_chat(phid, chat_id, error=None, form_rows=None):
@@ -445,14 +466,15 @@ def pharmacist_stock(phid):
 def api_messages(chat_id):
     """ข้อความใหม่ที่ message_id มากกว่า after + สถานะห้อง + ใบสั่งยา (ถ้าออกแล้ว)"""
     after = request.args.get("after", default=0, type=int)
-    tx.expire_unanswered()      # ห้องที่เกิน 10 นาทีโดยเภสัชกรไม่ตอบ -> ให้คำปรึกษาไม่สำเร็จ
+    tx.expire_overdue()         # ปิดห้องที่ฝ่ายที่ต้องตอบเกินเวลาแล้ว (เภสัชกร 10 นาที / คนไข้ 5 นาที)
     messages = db.query("""
         SELECT message_id, sender_type, content, TO_CHAR(sent_at, 'HH24:MI') AS sent_at
         FROM   chat_message
         WHERE  chat_id = :chat_id AND message_id > :after
         ORDER  BY message_id""", chat_id=chat_id, after=after)
     room = db.query_one(f"""
-        SELECT c.status, {CHAT_STATE_SQL} AS state, {SECONDS_LEFT_SQL} AS seconds_left, r.prescription_id
+        SELECT c.status, {CHAT_STATE_SQL} AS state, {TURN_SQL} AS turn, {SECONDS_LEFT_SQL} AS seconds_left,
+               r.prescription_id
         FROM   chat_room c
                JOIN consult_queue q ON q.queue_id = c.queue_id
                LEFT JOIN prescription r ON r.chat_id = c.chat_id
@@ -460,7 +482,7 @@ def api_messages(chat_id):
     if room is None:
         abort(404)
     return jsonify(messages=messages, status=room["status"], state=room["state"],
-                   state_label=STATUS_TH[room["state"]], seconds_left=room["seconds_left"],
+                   state_label=STATUS_TH[room["state"]], turn=room["turn"], seconds_left=room["seconds_left"],
                    prescription_id=room["prescription_id"])
 
 
@@ -481,16 +503,16 @@ def api_send_message(chat_id):
 @app.get("/api/patient/<int:pid>/state")
 def api_patient_state(pid):
     """ลายเซ็นของสถานะหน้าแรกคนไข้ : หน้าเว็บ reload เมื่อค่านี้เปลี่ยน"""
-    tx.expire_unanswered()
+    tx.expire_overdue()
     queue, prescriptions = patient_home_data(pid)
     return jsonify(state=[queue, [(p["prescription_id"], p["order_status"]) for p in prescriptions]])
 
 
 @app.get("/api/pharmacist/<int:phid>/state")
 def api_pharmacist_state(phid):
-    tx.expire_unanswered()
+    tx.expire_overdue()
     chats = pharmacist_home_data(get_pharmacist(phid))
-    return jsonify(state=[(c["chat_id"], c["state"], c["prescription_id"]) for c in chats])
+    return jsonify(state=[(c["chat_id"], c["state"], c["turn"], c["prescription_id"]) for c in chats])
 
 
 @app.errorhandler(DemoError)

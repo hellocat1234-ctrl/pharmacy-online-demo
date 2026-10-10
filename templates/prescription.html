@@ -1,37 +1,95 @@
 {% extends "base.html" %}
+{% block title %}ใบสั่งยาเลขที่ {{ rx.prescription_id }} - Pharmacy Online{% endblock %}
+{% block body_class %}bg-[#f0f9f8] font-sarabun heading-kanit{% endblock %}
+{% block main_class %}flex-grow max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 md:py-8{% endblock %}
 {% block content %}
-<div class="card">
-  <div class="card-header d-flex justify-content-between">
-    <span>3. ใบสั่งยาเลขที่ {{ rx.prescription_id }}</span>
-    <span>{{ rx.prescribed_date }} {{ rx.prescribed_time }} น.</span>
+<div class="bg-white rounded-xl shadow-sm border border-teal-100/80 p-6 md:p-8">
+  <div class="grid grid-cols-1 md:grid-cols-12 gap-6 items-start pb-6 border-b border-slate-100">
+    <div class="md:col-span-4 flex items-start space-x-3.5">
+      <div class="p-2.5 bg-blue-50 text-blue-600 rounded-lg shrink-0">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></svg>
+      </div>
+      <div>
+        <h1 class="text-xl font-bold text-slate-800 leading-tight">ใบสั่งยาเลขที่ {{ rx.prescription_id }}</h1>
+        <p class="text-xs text-slate-500 mt-1">{{ rx.prescribed_date }} &nbsp;เวลา {{ rx.prescribed_time }} น.</p>
+      </div>
+    </div>
+    <div class="md:col-span-3">
+      <div class="flex items-center space-x-1.5 text-teal-800 font-semibold text-sm">
+        <svg class="w-4 h-4 text-teal-600 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M4.5 10.5C3.67 10.5 3 11.17 3 12s.67 1.5 1.5 1.5h15c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5h-15z"></path>
+          <path d="M10.5 4.5C10.5 3.67 11.17 3 12 3s1.5.67 1.5 1.5v15c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5v-15z"></path>
+        </svg>
+        <span class="font-heading">Pharmacy Online</span>
+      </div>
+      <p class="text-xs text-slate-500 mt-1">เภสัชกร: <span class="text-slate-700 font-medium">ภก. {{ rx.pharmacist_name }}</span></p>
+    </div>
+    <div class="md:col-span-5 bg-slate-50/80 rounded-lg p-3.5 border border-slate-200/70 text-xs">
+      {% if rx.order_id %}
+        <div class="font-semibold text-slate-700 flex items-center mb-1">
+          <svg class="w-3.5 h-3.5 text-slate-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+          <span>สถานะการสั่งซื้อ</span>
+        </div>
+        <p class="text-slate-600 leading-relaxed">สั่งซื้อแล้ว (คำสั่งซื้อเลขที่ {{ rx.order_id }} · {{ rx.order_status|th }})</p>
+      {% else %}
+        <label class="font-semibold text-slate-700 flex items-center mb-1.5" for="shipping_address">
+          <svg class="w-3.5 h-3.5 text-slate-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+            <path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+          </svg>
+          <span>ที่อยู่จัดส่ง <span class="text-slate-400 font-normal">(ใช้ที่อยู่ของผู้ป่วย แก้ไขได้)</span></span>
+        </label>
+        <textarea class="w-full text-xs text-slate-700 leading-relaxed bg-white border border-slate-200 rounded-md px-2.5 py-2 focus:ring-teal-500 focus:border-teal-500 resize-none" id="shipping_address" name="shipping_address" form="order-form" rows="2" maxlength="500" required>{{ shipping_address }}</textarea>
+      {% endif %}
+    </div>
   </div>
-  <div class="card-body">
-    <p class="mb-3">{{ rx.pharmacy_name }} · ผู้สั่งยา: ภก. {{ rx.pharmacist_name }}</p>
-    <table class="table">
-      <thead><tr><th>#</th><th>ยา</th><th>ขนาดยา</th><th>วิธีใช้</th><th class="text-end">จำนวน</th><th class="text-end">ราคา/หน่วย</th><th class="text-end">รวม (บาท)</th></tr></thead>
-      <tbody>
+
+  <div class="mt-6 overflow-x-auto">
+    <table class="w-full text-left text-xs border-collapse">
+      <thead>
+        <tr class="bg-slate-50 border-y border-slate-200 text-slate-600 font-medium">
+          <th class="py-2.5 px-3 text-center w-10" scope="col">#</th>
+          <th class="py-2.5 px-4 min-w-[140px]" scope="col">ยา</th>
+          <th class="py-2.5 px-4 text-center min-w-[90px]" scope="col">ขนาดยา</th>
+          <th class="py-2.5 px-4 min-w-[200px]" scope="col">วิธีใช้</th>
+          <th class="py-2.5 px-3 text-center w-16" scope="col">จำนวน</th>
+          <th class="py-2.5 px-4 text-right w-24" scope="col">ราคา/หน่วย</th>
+          <th class="py-2.5 px-4 text-right w-24" scope="col">รวม</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 text-slate-700">
         {% for l in rx.lines %}
-        <tr><td>{{ l.line_no }}</td><td>{{ l.drug_name }}</td><td>{{ l.dosage }}</td><td>{{ l.usage_note }}</td>
-            <td class="text-end">{{ l.quantity }}</td><td class="text-end">{{ l.price|baht }}</td><td class="text-end">{{ l.line_total|baht }}</td></tr>
+        <tr class="hover:bg-slate-50/50 transition-colors">
+          <td class="py-3 px-3 text-center text-slate-400">{{ l.line_no }}</td>
+          <td class="py-3 px-4 font-medium text-slate-800">{{ l.drug_name }}</td>
+          <td class="py-3 px-4 text-center text-slate-600">{{ l.dosage }}</td>
+          <td class="py-3 px-4 text-slate-600">{{ l.usage_note }}</td>
+          <td class="py-3 px-3 text-center font-medium">{{ l.quantity }}</td>
+          <td class="py-3 px-4 text-right tabular-nums">{{ l.price|baht }}</td>
+          <td class="py-3 px-4 text-right font-medium tabular-nums">{{ l.line_total|baht }}</td>
+        </tr>
         {% endfor %}
       </tbody>
-      <tfoot><tr><th colspan="6" class="text-end">ยอดรวม</th><th class="text-end">{{ rx.total|baht }}</th></tr></tfoot>
+      <tfoot>
+        <tr class="border-t border-slate-200 font-semibold text-slate-800 bg-slate-50/40">
+          <td class="py-2.5" colspan="5"></td>
+          <td class="py-2.5 px-4 text-right text-slate-600">ยอดรวม</td>
+          <td class="py-2.5 px-4 text-right text-teal-700 font-bold tabular-nums">{{ rx.total|baht }}</td>
+        </tr>
+      </tfoot>
     </table>
+  </div>
 
+  <div class="mt-8 flex justify-end">
     {% if rx.order_id %}
-      <div class="alert alert-secondary mb-0">
-        สั่งซื้อแล้ว (คำสั่งซื้อเลขที่ {{ rx.order_id }} · {{ rx.order_status|th }})
-        {% if rx.order_status == 'pending_payment' %}
-          <a class="btn btn-primary ms-2" href="{{ url_for('patient_pay', pid=patient.patient_id, order_id=rx.order_id) }}">ไปชำระเงิน</a>
-        {% else %}
-          <a class="btn btn-outline-primary ms-2" href="{{ url_for('patient_receipt', pid=patient.patient_id, order_id=rx.order_id) }}">ดูใบเสร็จ</a>
-        {% endif %}
-      </div>
+      {% if rx.order_status == 'pending_payment' %}
+        <a class="bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white font-medium text-sm px-10 py-2.5 rounded-lg shadow hover:shadow-md transition duration-150 ease-in-out font-heading" href="{{ url_for('patient_pay', pid=patient.patient_id, order_id=rx.order_id) }}">ไปชำระเงิน</a>
+      {% else %}
+        <a class="bg-white hover:bg-teal-50 text-teal-700 border border-teal-600 font-medium text-sm px-10 py-2.5 rounded-lg shadow-sm transition duration-150 ease-in-out font-heading" href="{{ url_for('patient_receipt', pid=patient.patient_id, order_id=rx.order_id) }}">ดูใบเสร็จ</a>
+      {% endif %}
     {% else %}
-      <form method="post" action="{{ url_for('patient_place_order', pid=patient.patient_id, rx_id=rx.prescription_id) }}">
-        <label class="form-label" for="shipping_address">ที่อยู่จัดส่ง</label>
-        <textarea class="form-control mb-3" id="shipping_address" name="shipping_address" rows="2" maxlength="500" required>{{ shipping_address }}</textarea>
-        <button class="btn btn-primary btn-lg">สั่งซื้อ</button>
+      <form id="order-form" method="post" action="{{ url_for('patient_place_order', pid=patient.patient_id, rx_id=rx.prescription_id) }}">
+        <button class="bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white font-medium text-sm px-10 py-2.5 rounded-lg shadow hover:shadow-md transition duration-150 ease-in-out cursor-pointer font-heading" type="submit">สั่งซื้อ</button>
       </form>
     {% endif %}
   </div>

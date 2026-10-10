@@ -37,12 +37,10 @@ def _run(work):
 # จึง "คำนวณ" สถานะจากข้อมูลที่มีอยู่ ไม่เพิ่มคอลัมน์และไม่แก้ CHECK
 #   open   + เภสัชกรยังไม่เคยส่งข้อความ   = waiting_reply (รอตอบกลับ)
 #   open   + เภสัชกรส่งข้อความแล้ว         = consulting    (ระหว่างปรึกษา)
-#   closed + คิวเป็น cancelled            = failed        (ให้คำปรึกษาไม่สำเร็จ)
-#   closed + คิวเป็น completed            = closed        (ปิดห้องแชทแล้ว)
+#   closed + คิวเป็น cancelled            = failed        (ให้คำปรึกษาไม่สำเร็จ : เภสัชกรไม่ตอบทันเวลา)
+#   closed + คิวเป็น completed            = closed        (ปิดห้องแชทแล้ว : เภสัชกรปิดเอง หรือคนไข้ไม่ตอบทันเวลา)
 # ใช้ใน SELECT ที่ตั้ง alias chat_room เป็น c และ consult_queue เป็น q
 # ---------------------------------------------------------------------
-REPLY_LIMIT_MINUTES = 10
-
 CHAT_STATE_SQL = """
     CASE WHEN c.status = 'open' AND EXISTS (SELECT 1 FROM chat_message m
                                             WHERE  m.chat_id = c.chat_id AND m.sender_type = 'pharmacist')
@@ -52,9 +50,36 @@ CHAT_STATE_SQL = """
          ELSE 'closed'
     END"""
 
-# จำนวนวินาทีที่เหลือก่อนครบ 10 นาทีนับจากเวลาสร้างห้องแชท (ติดลบ = เกินเวลาแล้ว)
+
+# ---------------------------------------------------------------------
+# ตัวนับเวลาตอบกลับ : เริ่มนับใหม่ทุกครั้งที่มีข้อความ คำนวณจากข้อความล่าสุดใน chat_message
+# (ดู sender_type และ sent_at) ไม่เพิ่มคอลัมน์
+#   ข้อความล่าสุดมาจากคนไข้ หรือยังไม่มีข้อความ -> ตาเภสัชกร ต้องตอบภายใน 10 นาที
+#                                                  นับจาก sent_at ของข้อความนั้น (หรือ started_at ของห้อง)
+#   ข้อความล่าสุดมาจากเภสัชกร                 -> ตาคนไข้ ต้องตอบภายใน 5 นาที นับจาก sent_at ของข้อความนั้น
+# ใช้ใน SELECT ที่ตั้ง alias chat_room เป็น c
+# ---------------------------------------------------------------------
+PHARMACIST_REPLY_MINUTES = 10
+PATIENT_REPLY_MINUTES = 5
+
+_LAST_MESSAGE_SQL = "(SELECT MAX(m2.message_id) FROM chat_message m2 WHERE m2.chat_id = c.chat_id)"
+
+# ใครต้องเป็นฝ่ายตอบ : 'pharmacist' หรือ 'patient'
+TURN_SQL = f"""
+    NVL((SELECT CASE m.sender_type WHEN 'pharmacist' THEN 'patient' ELSE 'pharmacist' END
+         FROM   chat_message m WHERE m.message_id = {_LAST_MESSAGE_SQL}), 'pharmacist')"""
+
+# จำนวนวินาทีที่เหลือของฝ่ายที่ต้องตอบ (0 หรือติดลบ = หมดเวลาแล้ว)
 SECONDS_LEFT_SQL = f"""
-    ROUND((CAST(c.started_at AS DATE) - CAST(CURRENT_TIMESTAMP AS DATE)) * 86400) + {REPLY_LIMIT_MINUTES * 60}"""
+    ROUND((CAST(NVL((SELECT m.sent_at FROM chat_message m WHERE m.message_id = {_LAST_MESSAGE_SQL}),
+                    c.started_at) AS DATE)
+           - CAST(CURRENT_TIMESTAMP AS DATE)) * 86400)
+    + CASE {TURN_SQL} WHEN 'pharmacist' THEN {PHARMACIST_REPLY_MINUTES * 60} ELSE {PATIENT_REPLY_MINUTES * 60} END"""
+
+TIMEOUT_MESSAGE = {
+    "pharmacist": f"เภสัชกรไม่ได้ตอบภายใน {PHARMACIST_REPLY_MINUTES} นาที ห้องแชทถูกปิดเป็น “ให้คำปรึกษาไม่สำเร็จ” ส่งข้อความไม่ได้",
+    "patient": f"คนไข้ไม่ได้ตอบภายใน {PATIENT_REPLY_MINUTES} นาที ห้องแชทถูกปิดแล้ว ส่งข้อความไม่ได้",
+}
 
 
 # ---------------------------------------------------------------------
@@ -112,7 +137,7 @@ def _match_waiting(cur, pharmacy_id):
 
         # (ค) สร้างห้องแชท : คิว 1 - 1 ห้องแชท (uq_chat_queue)
         #     status = open และเภสัชกรยังไม่มีข้อความ = "รอตอบกลับ"
-        #     started_at = เวลาที่จับคู่ ตัวนับ 10 นาทีจึงเริ่มตอนได้ห้อง ไม่ใช่ตอนเข้าคิว
+        #     started_at = เวลาที่จับคู่ ตัวนับ 10 นาทีของเภสัชกรจึงเริ่มตอนได้ห้อง ไม่ใช่ตอนเข้าคิว
         cur.execute("""
             INSERT INTO chat_room (chat_id, queue_id, pharmacist_id, status)
             VALUES (seq_chat_room.NEXTVAL, :queue_id, :pharmacist_id, 'open')""",
@@ -196,61 +221,90 @@ def close_chat(pharmacist_id, chat_id):
 
 
 # ---------------------------------------------------------------------
-# 2.1) เภสัชกรไม่ตอบภายใน 10 นาที -> "ให้คำปรึกษาไม่สำเร็จ"
-#      chat_room = closed, consult_queue = cancelled แล้วจับคู่คิวที่รอคนถัดไป (Transaction เดียวกัน)
-#      chat_id = None  : ตรวจทุกห้องที่เกินเวลาจริง (หน้าเว็บเรียกตอน polling)
-#      chat_id = เลขห้อง : ปุ่มทดสอบ "จำลองหมดเวลา" ไม่ต้องรอครบ 10 นาที
+# 2.1) หมดเวลาตอบกลับ -> ปิดห้อง แล้วจับคู่คิวที่รอคนถัดไป (Transaction เดียวกัน)
+#      เภสัชกรไม่ตอบภายใน 10 นาที : chat_room = closed, consult_queue = cancelled (ให้คำปรึกษาไม่สำเร็จ)
+#      คนไข้ไม่ตอบภายใน 5 นาที    : chat_room = closed, consult_queue = completed (ปิดห้องแชทแล้ว)
 # ---------------------------------------------------------------------
-def expire_unanswered(chat_id=None):
+def _lock_open_rooms(cur, chat_id=None):
+    """ล็อกห้องที่ยัง open ด้วย FOR UPDATE (กันอีกฝ่ายส่งข้อความแทรกระหว่างที่กำลังตัดสินว่าหมดเวลา)
+    แล้วคืน [(chat_id, queue_id, turn, seconds_left), ...]"""
+    cur.execute("""
+        SELECT c.chat_id FROM chat_room c
+        WHERE  c.status = 'open' AND (:chat_id IS NULL OR c.chat_id = :chat_id)
+        FOR UPDATE""", chat_id=chat_id)
+    locked = [row[0] for row in cur.fetchall()]
+    rooms = []
+    for locked_id in locked:
+        cur.execute(f"""
+            SELECT c.chat_id, c.queue_id, {TURN_SQL}, {SECONDS_LEFT_SQL}
+            FROM   chat_room c WHERE c.chat_id = :chat_id""", chat_id=locked_id)
+        rooms.append(cur.fetchone())
+    return rooms
+
+
+def _close_timed_out(cur, chat_id, queue_id, turn):
+    """ปิดห้องที่หมดเวลา : สถานะคิวขึ้นกับว่าฝ่ายไหนไม่ตอบ  คืน pharmacy_id ของคิว"""
+    cur.execute("""
+        UPDATE chat_room SET status = 'closed', updated_at = CURRENT_TIMESTAMP
+        WHERE  chat_id = :chat_id""", chat_id=chat_id)
+    pharmacy_id_var = cur.var(int)
+    cur.execute("""
+        UPDATE consult_queue SET status = :status, updated_at = CURRENT_TIMESTAMP
+        WHERE  queue_id = :queue_id
+        RETURNING pharmacy_id INTO :pharmacy_id""",
+        status="cancelled" if turn == "pharmacist" else "completed",
+        queue_id=queue_id, pharmacy_id=pharmacy_id_var)
+    return pharmacy_id_var.getvalue()[0]
+
+
+def expire_overdue(chat_id=None, side=None):
+    """ไม่ส่งอะไร        : ปิดทุกห้องที่เกินเวลาจริง (หน้าเว็บเรียกตอน polling)
+    ส่ง chat_id + side : ปุ่มทดสอบ "หมดเวลา" ถือว่าฝ่าย side หมดเวลาทันที (ได้ผลเมื่อเป็นตาของฝ่ายนั้น)
+    คืนจำนวนห้องที่ถูกปิด"""
     def work(cur):
-        # ล็อกห้องที่เข้าเงื่อนไขด้วย FOR UPDATE กันเภสัชกรตอบแทรกระหว่างที่กำลังปิด
-        cur.execute("""
-            SELECT c.chat_id, c.queue_id
-            FROM   chat_room c
-            WHERE  c.status = 'open'
-            AND    NOT EXISTS (SELECT 1 FROM chat_message m
-                               WHERE  m.chat_id = c.chat_id AND m.sender_type = 'pharmacist')
-            AND    (c.chat_id = :chat_id
-                    OR (:chat_id IS NULL
-                        AND c.started_at <= CURRENT_TIMESTAMP - NUMTODSINTERVAL(:limit_minutes, 'MINUTE')))
-            FOR UPDATE OF c.status""",
-            chat_id=chat_id, limit_minutes=REPLY_LIMIT_MINUTES)
-        rooms = cur.fetchall()
         pharmacy_ids = set()
-        for room_chat_id, queue_id in rooms:
-            cur.execute("""
-                UPDATE chat_room SET status = 'closed', updated_at = CURRENT_TIMESTAMP
-                WHERE  chat_id = :chat_id""", chat_id=room_chat_id)
-            pharmacy_id_var = cur.var(int)
-            cur.execute("""
-                UPDATE consult_queue SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-                WHERE  queue_id = :queue_id
-                RETURNING pharmacy_id INTO :pharmacy_id""",
-                queue_id=queue_id, pharmacy_id=pharmacy_id_var)
-            pharmacy_ids.add(pharmacy_id_var.getvalue()[0])
+        closed = 0
+        for room_id, queue_id, turn, seconds_left in _lock_open_rooms(cur, chat_id):
+            overdue = (turn == side) if chat_id is not None else (seconds_left <= 0)
+            if overdue:
+                pharmacy_ids.add(_close_timed_out(cur, room_id, queue_id, turn))
+                closed += 1
+        # เภสัชกรว่างลง -> จับคู่คิวที่รอคนถัดไป (สำเร็จหรือยกเลิกพร้อมกับการปิดห้อง)
         for pharmacy_id in sorted(pharmacy_ids):
             _match_waiting(cur, pharmacy_id)
-        return len(rooms)
+        return closed
 
     return _run(work)
 
 
 # ---------------------------------------------------------------------
 # 3) ส่งข้อความแชท -> chat_message
+#    ตรวจเวลาฝั่งเซิร์ฟเวอร์ก่อนบันทึกทุกครั้ง : ถ้าฝ่ายที่ต้องตอบเกินเวลาแล้ว
+#    ข้อความถูกปฏิเสธ และห้องถูกปิดใน Transaction นี้เลย (ไม่พึ่งการซ่อนปุ่มในหน้าเว็บ)
+#    ข้อความที่บันทึกสำเร็จทำให้ตัวนับของอีกฝ่ายเริ่มใหม่ เพราะตัวนับคำนวณจากข้อความล่าสุด
 # ---------------------------------------------------------------------
 def send_message(chat_id, sender_type, content):
     def work(cur):
-        # INSERT ... SELECT จาก chat_room เพื่อให้ส่งได้เฉพาะห้องที่ยัง open
+        rooms = _lock_open_rooms(cur, chat_id)
+        if not rooms:
+            raise DemoError("ห้องแชทนี้ปิดแล้ว")
+        _, queue_id, turn, seconds_left = rooms[0]
+
+        if seconds_left <= 0:
+            # หมดเวลาแล้ว : ปิดห้อง + จับคู่คิวถัดไป แล้ว COMMIT (คืนข้อความปฏิเสธแทนการ raise
+            # เพราะ raise จะทำให้ _run() ROLLBACK การปิดห้องไปด้วย)
+            _match_waiting(cur, _close_timed_out(cur, chat_id, queue_id, turn))
+            return TIMEOUT_MESSAGE[turn]
+
         cur.execute("""
             INSERT INTO chat_message (message_id, chat_id, sender_type, message_type, content)
-            SELECT seq_chat_message.NEXTVAL, c.chat_id, :sender_type, 'text', :content
-            FROM   chat_room c
-            WHERE  c.chat_id = :chat_id AND c.status = 'open'""",
+            VALUES (seq_chat_message.NEXTVAL, :chat_id, :sender_type, 'text', :content)""",
             chat_id=chat_id, sender_type=sender_type, content=content)
-        if cur.rowcount == 0:
-            raise DemoError("ห้องแชทนี้ปิดแล้ว")
+        return None
 
-    return _run(work)
+    rejected = _run(work)
+    if rejected:
+        raise DemoError(rejected)
 
 
 # ---------------------------------------------------------------------

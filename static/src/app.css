@@ -1,0 +1,136 @@
+/* ไฟล์ต้นทางของ static/app.css (build ด้วย Tailwind ดูคำสั่งใน README) */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  /* หน้าที่ใช้ Sarabun เป็นตัวเนื้อหา หัวข้อใช้ Prompt ตามดีไซน์ */
+  .font-sarabun h1, .font-sarabun h2, .font-sarabun h3, .font-sarabun h4, .font-heading {
+    font-family: "Prompt", sans-serif;
+  }
+  .heading-kanit h1, .heading-kanit .font-heading {
+    font-family: "Kanit", sans-serif;
+  }
+}
+
+@layer components {
+  /* การ์ดเลือกบทบาท (หน้าแรก) */
+  .role-card {
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .role-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.08), 0 6px 12px -4px rgba(0, 0, 0, 0.04);
+  }
+
+  /* ตารางหน้ารายการห้องแชทของเภสัชกร */
+  .dashboard-table th {
+    font-weight: 500;
+    color: #4b5563;
+    background-color: #f8fafc;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #e2e8f0;
+    white-space: nowrap;
+  }
+  .dashboard-table td {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid #f1f5f9;
+    color: #334155;
+    font-size: 0.925rem;
+  }
+  .dashboard-table tr:hover {
+    background-color: #fcfdfe;
+  }
+
+  .dashboard-card {
+    background: #ffffff;
+    border-radius: 0.75rem;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #f1f5f9;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 9999px;
+  }
+
+  /* ---- class ที่ static/chat.js และ static/poll.js สร้าง/สลับเอง (ห้ามเปลี่ยนชื่อ) ---- */
+
+  /* ข้อความแชท : chat.js สร้าง <div class="msg mine|theirs">ข้อความ<small>ผู้ส่ง · เวลา</small></div> */
+  .msg {
+    @apply max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm whitespace-pre-wrap break-words;
+  }
+  .msg.mine {
+    @apply self-end bg-sky-500 text-white rounded-tr-sm;
+  }
+  .msg.theirs {
+    @apply self-start bg-white border border-slate-200 text-slate-800 rounded-tl-sm;
+  }
+  .msg small {
+    @apply block mt-1 text-[10px] font-medium;
+  }
+  .msg.mine small {
+    @apply text-sky-100 text-right;
+  }
+  .msg.theirs small {
+    @apply text-slate-400;
+  }
+
+  /* ป้ายสถานะห้องแชท : chat.js ตั้ง class เป็น "badge bg-warning text-dark" | "badge bg-success" | ... */
+  #chat-status.badge {
+    @apply inline-flex items-center border text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap;
+  }
+  #chat-status.bg-warning {
+    @apply bg-sky-50 text-sky-600 border-sky-200;
+  }
+  #chat-status.bg-success {
+    @apply bg-emerald-50 text-emerald-700 border-emerald-200;
+  }
+  #chat-status.bg-danger {
+    @apply bg-rose-50 text-rose-700 border-rose-200;
+  }
+  #chat-status.bg-secondary {
+    @apply bg-purple-100 text-purple-800 border-purple-200;
+  }
+
+  /* ตัวนับเวลาในห้องแชท : chat.js ใส่ timer-mine เมื่อผู้ที่เปิดหน้านี้เป็นฝ่ายที่ต้องตอบ */
+  #reply-timer {
+    @apply bg-slate-50 text-slate-600 border-slate-200;
+  }
+  #reply-timer.timer-mine {
+    @apply bg-rose-50 text-rose-600 border-rose-200;
+  }
+
+  /* ตัวนับเวลาถอยหลัง : poll.js เพิ่ม text-danger เมื่อเหลือไม่เกิน 1 นาที */
+  .countdown.text-danger {
+    @apply text-rose-700 font-bold;
+  }
+}
+
+/* chat.js ใช้ d-none ซ่อน/แสดงองค์ประกอบ ต้องชนะ utility ของ Tailwind (เช่น flex) */
+.d-none {
+  display: none !important;
+}
+
+@media print {
+  body {
+    background-color: #ffffff !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-shadow-none {
+    box-shadow: none !important;
+    border: none !important;
+  }
+}

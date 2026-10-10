@@ -1,5 +1,10 @@
 {% extends "base.html" %}
+{% block title %}เกิดข้อผิดพลาด - Pharmacy Online{% endblock %}
+{% block main_class %}flex-1 max-w-2xl w-full mx-auto px-4 py-10{% endblock %}
 {% block content %}
-<div class="alert alert-danger fs-5">{{ message }}</div>
-<a class="btn btn-secondary" href="{{ url_for('index') }}">กลับหน้าแรก</a>
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 sm:p-8 text-center">
+  <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#fff8e6] border border-[#fed7aa] text-amber-600 font-bold text-xl mb-3">!</div>
+  <p class="text-base font-medium text-slate-800">{{ message }}</p>
+  <a class="inline-flex items-center justify-center mt-6 bg-[#0d9488] hover:bg-[#0f766e] text-white font-medium py-2.5 px-6 rounded-lg shadow-sm transition-colors text-sm" href="{{ url_for('index') }}">กลับหน้าแรก</a>
+</div>
 {% endblock %}

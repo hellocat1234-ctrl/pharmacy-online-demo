@@ -1,32 +1,72 @@
 {% extends "base.html" %}
+{% block title %}สต็อกยา (เภสัชกร) - Pharmacy Online{% endblock %}
+{% block body_class %}bg-[#f3f7f9] font-sarabun{% endblock %}
 {% block content %}
-<div class="card">
-  <div class="card-header d-flex justify-content-between">
-    <span>7. สต็อกยา · {{ pharmacist.pharmacy_name }}</span>
-    <small class="text-muted">อัปเดตอัตโนมัติทุก 3 วินาที</small>
+{% set drug_count = rows|selectattr('lot_seq', 'equalto', 1)|list|length %}
+{% set lot_count = rows|selectattr('lot_no')|list|length %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+  <div class="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-4 bg-white">
+    <div class="flex items-center space-x-3">
+      <div class="p-2 bg-teal-50 text-teal-700 rounded-lg">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+      </div>
+      <h1 class="text-xl font-bold text-gray-800">สต็อกยา</h1>
+    </div>
+    <div class="flex items-center gap-1.5 text-xs sm:text-sm font-medium text-teal-700 bg-teal-50/70 px-3 py-1.5 rounded-full border border-teal-100 whitespace-nowrap">
+      <svg class="w-4 h-4 text-teal-600 animate-spin" fill="none" stroke="currentColor" style="animation-duration: 4s;" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+      <span>อัปเดตอัตโนมัติทุก 3 วินาที</span>
+    </div>
   </div>
-  <table class="table mb-0 align-middle">
-    <thead><tr><th>รหัส</th><th>ชื่อยา</th><th>รูปแบบ</th><th class="text-end">ราคา/หน่วย</th><th>ล็อต</th><th>วันหมดอายุ</th><th class="text-end">คงเหลือในล็อต</th><th class="text-end">คงเหลือรวม</th><th>ตัดสต็อกล่าสุด</th></tr></thead>
-    <tbody>
-      {% for r in rows %}
-      <tr>
-        {% if r.lot_seq == 1 %}
-          <td rowspan="{{ r.lot_count }}">{{ r.drug_id }}</td>
-          <td rowspan="{{ r.lot_count }}"><strong>{{ r.name }}</strong></td>
-          <td rowspan="{{ r.lot_count }}">{{ r.dosage_form }}</td>
-          <td rowspan="{{ r.lot_count }}" class="text-end">{{ r.price|baht }}</td>
-        {% endif %}
-        <td>{{ r.lot_no or '-' }}</td>
-        <td>{{ r.expiry_date or '-' }}{% if r.expired %} <span class="badge bg-danger">หมดอายุ</span>{% endif %}</td>
-        <td class="text-end">{{ r.quantity if r.quantity is not none else '-' }}</td>
-        {% if r.lot_seq == 1 %}
-          <td rowspan="{{ r.lot_count }}" class="text-end fs-5 {{ 'text-danger' if not r.drug_total else '' }}">{{ r.drug_total or 0 }}</td>
-        {% endif %}
-        <td><small class="text-muted">{{ r.updated_at or '-' }}</small></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="overflow-x-auto">
+    <table class="w-full text-left border-collapse text-sm">
+      <thead>
+        <tr class="bg-gray-50 border-b border-gray-200 text-gray-600 font-prompt font-medium text-xs whitespace-nowrap">
+          <th class="py-3.5 px-4 text-center" scope="col">รหัสยา</th>
+          <th class="py-3.5 px-4" scope="col">ชื่อยา</th>
+          <th class="py-3.5 px-4 text-center" scope="col">รูปแบบ</th>
+          <th class="py-3.5 px-4 text-right" scope="col">ราคา/หน่วย</th>
+          <th class="py-3.5 px-4 text-center" scope="col">ล็อต</th>
+          <th class="py-3.5 px-4 text-center" scope="col">วันหมดอายุ</th>
+          <th class="py-3.5 px-4 text-center" scope="col">คงเหลือในล็อต</th>
+          <th class="py-3.5 px-4 text-center" scope="col">คงเหลือรวม</th>
+          <th class="py-3.5 px-4 text-center" scope="col">ตัดสต็อกล่าสุด</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200 text-gray-700 text-sm">
+        {% for r in rows %}
+        {% set first = r.lot_seq == 1 %}
+        {% set sub = '' if first else 'border-t border-dashed border-gray-200' %}
+        <tr class="hover:bg-teal-50/20 transition-colors {{ '' if first else 'bg-gray-50/30' }}">
+          {% if first %}
+            <td class="py-3.5 px-4 font-mono font-medium text-gray-900 text-center align-middle" rowspan="{{ r.lot_count }}">{{ r.drug_id }}</td>
+            <td class="py-3.5 px-4 font-medium text-gray-900 align-middle" rowspan="{{ r.lot_count }}">{{ r.name }}</td>
+            <td class="py-3.5 px-4 text-center text-gray-600 align-middle" rowspan="{{ r.lot_count }}">{{ r.dosage_form }}</td>
+            <td class="py-3.5 px-4 text-right font-mono align-middle" rowspan="{{ r.lot_count }}">{{ r.price|baht }}</td>
+          {% endif %}
+          <td class="py-3 px-4 text-center font-mono text-gray-600 {{ sub }}">{{ r.lot_no or '-' }}</td>
+          <td class="py-3 px-4 text-center font-mono text-gray-600 {{ sub }}">{{ r.expiry_date or '-' }}</td>
+          <td class="py-3 px-4 text-center {{ sub }}">
+            <span class="inline-flex items-center gap-1.5">
+              {% if r.expired %}<span class="bg-rose-500 text-white text-[11px] font-semibold px-2 py-0.5 rounded shadow-sm">หมดอายุ</span>{% endif %}
+              <span class="font-bold font-mono {{ 'text-rose-600' if r.expired or not r.quantity else 'text-gray-800' }}">{{ r.quantity if r.quantity is not none else '-' }}</span>
+            </span>
+          </td>
+          {% if first %}
+            <td class="py-3.5 px-4 text-center font-bold font-mono align-middle {{ 'text-emerald-600' if r.drug_total else 'text-rose-600' }}" rowspan="{{ r.lot_count }}">{{ r.drug_total or 0 }}</td>
+          {% endif %}
+          <td class="py-3 px-4 text-center text-xs font-mono {{ 'text-gray-500' if r.updated_at else 'text-gray-400' }} {{ sub }}">{{ r.updated_at or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="px-6 py-3.5 bg-gray-50 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+    <div><span>แสดงทั้งหมด <strong>{{ drug_count }}</strong> รายการยา ({{ lot_count }} ล็อตย่อย)</span></div>
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span><span>สต็อกปกติ</span></div>
+      <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span><span>สินค้าหมดอายุ / หมดสต็อก</span></div>
+    </div>
+  </div>
 </div>
 {% endblock %}
 {% block scripts %}

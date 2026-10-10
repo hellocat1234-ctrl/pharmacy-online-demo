@@ -1,47 +1,117 @@
 {% extends "base.html" %}
+{% block title %}ชำระเงิน คำสั่งซื้อเลขที่ {{ order.order_id }} - Pharmacy Online{% endblock %}
+{% block body_class %}bg-slate-100 font-sans text-slate-700{% endblock %}
+{% block main_class %}flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8{% endblock %}
 {% block content %}
-<div class="row g-4">
-  <div class="col-lg-7">
-    <div class="card">
-      <div class="card-header d-flex justify-content-between">
-        <span>4. ชำระเงิน · คำสั่งซื้อเลขที่ {{ order.order_id }}</span>
-        <span class="badge bg-warning text-dark">{{ order.status|th }}</span>
+<div class="dashboard-card p-5 sm:p-7 space-y-6">
+  <div class="flex flex-wrap items-center justify-between border-b border-slate-100 pb-4 gap-3">
+    <div class="flex items-center gap-3 flex-wrap">
+      <div class="text-teal-600">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
       </div>
-      <div class="card-body">
-        <table class="table">
-          <thead><tr><th>#</th><th>ยา</th><th class="text-end">จำนวน</th><th class="text-end">ราคา/หน่วย</th><th class="text-end">รวม (บาท)</th></tr></thead>
-          <tbody>
+      <h1 class="text-lg sm:text-xl font-bold text-slate-800">คำสั่งซื้อเลขที่ {{ order.order_id }}</h1>
+      <span class="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 whitespace-nowrap">{{ order.status|th }}</span>
+    </div>
+    <span class="text-xs text-slate-400">สั่งเมื่อ {{ order.ordered_at }}</span>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+    <div class="lg:col-span-7 overflow-hidden border border-slate-200 rounded-lg bg-white shadow-sm">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-slate-600 border-collapse">
+          <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th class="py-2.5 px-3 text-center w-10" scope="col">#</th>
+              <th class="py-2.5 px-4 font-semibold text-slate-700" scope="col">ยา</th>
+              <th class="py-2.5 px-3 text-center font-semibold text-slate-700" scope="col">จำนวน</th>
+              <th class="py-2.5 px-3 text-right font-semibold text-slate-700" scope="col">ราคา/หน่วย</th>
+              <th class="py-2.5 px-4 text-right font-semibold text-slate-700" scope="col">รวม</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 text-sm">
             {% for l in order.lines %}
-            <tr><td>{{ l.line_no }}</td><td>{{ l.drug_name }}</td><td class="text-end">{{ l.quantity }}</td>
-                <td class="text-end">{{ l.unit_price|baht }}</td><td class="text-end">{{ l.line_total|baht }}</td></tr>
+            <tr class="hover:bg-slate-50/70 transition-colors">
+              <td class="py-3 px-3 text-center font-medium text-slate-500">{{ l.line_no }}</td>
+              <td class="py-3 px-4 font-medium text-slate-800">{{ l.drug_name }}</td>
+              <td class="py-3 px-3 text-center">{{ l.quantity }}</td>
+              <td class="py-3 px-3 text-right">{{ l.unit_price|baht }}</td>
+              <td class="py-3 px-4 text-right font-semibold text-slate-800">{{ l.line_total|baht }}</td>
+            </tr>
             {% endfor %}
           </tbody>
-          <tfoot><tr><th colspan="4" class="text-end">ยอดที่ต้องชำระ</th><th class="text-end fs-5">{{ order.total|baht }}</th></tr></tfoot>
+          <tfoot class="border-t border-slate-200 bg-slate-50/60 font-semibold text-slate-800">
+            <tr>
+              <td class="py-3 px-4 text-right text-slate-600" colspan="4">รวมทั้งสิ้น</td>
+              <td class="py-3 px-4 text-right text-teal-700 font-bold text-base">{{ order.total|baht }}</td>
+            </tr>
+          </tfoot>
         </table>
-        <p class="mb-0 text-muted">จัดส่งที่: {{ order.shipping_address }}</p>
+      </div>
+    </div>
+
+    <div class="lg:col-span-5 border border-slate-200 rounded-lg p-4 bg-white space-y-5">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <!-- QR (จำลอง) -->
+        <form class="flex flex-col items-center text-center p-3 rounded-lg border border-slate-100 bg-slate-50/50" method="post">
+          <input type="hidden" name="method" value="qr_code">
+          <span class="text-xs font-medium text-slate-700 mb-2">สแกน QR เพื่อชำระเงิน</span>
+          <div class="p-2 bg-white border border-slate-300 rounded shadow-sm mb-3">
+            <svg class="w-24 h-24 text-slate-900" fill="currentColor" viewBox="0 0 100 100">
+              <rect fill="none" height="28" stroke="currentColor" stroke-width="6" width="28" x="5" y="5"></rect>
+              <rect height="12" width="12" x="13" y="13"></rect>
+              <rect fill="none" height="28" stroke="currentColor" stroke-width="6" width="28" x="67" y="5"></rect>
+              <rect height="12" width="12" x="75" y="13"></rect>
+              <rect fill="none" height="28" stroke="currentColor" stroke-width="6" width="28" x="5" y="67"></rect>
+              <rect height="12" width="12" x="13" y="75"></rect>
+              <rect height="6" width="6" x="42" y="8"></rect>
+              <rect height="6" width="6" x="52" y="18"></rect>
+              <rect height="6" width="6" x="42" y="28"></rect>
+              <rect height="6" width="6" x="8" y="44"></rect>
+              <rect height="6" width="6" x="22" y="44"></rect>
+              <rect height="6" width="6" x="15" y="54"></rect>
+              <rect height="10" width="10" x="45" y="45"></rect>
+              <rect height="6" width="6" x="62" y="44"></rect>
+              <rect height="6" width="6" x="80" y="44"></rect>
+              <rect height="6" width="6" x="72" y="54"></rect>
+              <rect height="6" width="6" x="44" y="65"></rect>
+              <rect height="6" width="6" x="54" y="75"></rect>
+              <rect height="6" width="6" x="44" y="85"></rect>
+              <rect height="6" width="6" x="72" y="72"></rect>
+              <rect height="6" width="6" x="82" y="82"></rect>
+            </svg>
+          </div>
+          <button class="w-full mt-auto py-2 px-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400" type="submit">ชำระเงิน {{ order.total|baht }} บาท</button>
+          <span class="text-[10px] text-slate-400 mt-1.5">จำลองการสแกนจ่าย</span>
+        </form>
+
+        <!-- โอนเงิน (จำลอง) -->
+        <form class="flex flex-col text-center p-3 rounded-lg border border-slate-100 bg-slate-50/50 justify-between" method="post">
+          <input type="hidden" name="method" value="bank_transfer">
+          <div>
+            <span class="text-xs font-medium text-slate-700 block mb-3">โอนเงินผ่านธนาคาร</span>
+            <div class="text-left mb-4">
+              <label class="sr-only" for="bankSelect">เลือกธนาคาร</label>
+              <select class="w-full text-xs border-slate-300 rounded-md py-1.5 px-2 bg-white text-slate-700 focus:border-blue-500 focus:ring-blue-500" id="bankSelect" name="bank_name">
+                <option>ธนาคารตัวอย่าง ก</option>
+                <option>ธนาคารตัวอย่าง ข</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <button class="w-full py-2 px-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400 leading-snug" type="submit">โอนเงินและแนบสลิป</button>
+            <span class="block text-[10px] text-slate-400 mt-1.5">จำลองการโอนเงิน</span>
+          </div>
+        </form>
       </div>
     </div>
   </div>
-  <div class="col-lg-5">
-    <div class="card mb-3">
-      <div class="card-header">ชำระด้วย QR Code (จำลอง)</div>
-      <form class="card-body text-center" method="post">
-        <input type="hidden" name="method" value="qr_code">
-        <div class="qr-mock mx-auto mb-3"></div>
-        <button class="btn btn-primary">จำลองการสแกนจ่าย {{ order.total|baht }} บาท</button>
-      </form>
-    </div>
-    <div class="card">
-      <div class="card-header">โอนเงินผ่านธนาคาร (จำลอง)</div>
-      <form class="card-body" method="post">
-        <input type="hidden" name="method" value="bank_transfer">
-        <select class="form-select mb-3" name="bank_name">
-          <option>ธนาคารตัวอย่าง ก</option>
-          <option>ธนาคารตัวอย่าง ข</option>
-        </select>
-        <button class="btn btn-outline-primary">จำลองการโอนเงินและแนบสลิป</button>
-      </form>
-    </div>
+
+  <div class="pt-4 border-t border-slate-100 flex items-start sm:items-center text-xs sm:text-sm text-slate-600">
+    <svg class="w-4 h-4 text-teal-600 mr-2 shrink-0 mt-0.5 sm:mt-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+      <path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+    </svg>
+    <p class="leading-relaxed"><span class="font-semibold text-slate-700">จัดส่งที่:</span> {{ order.shipping_address }}</p>
   </div>
 </div>
 {% endblock %}

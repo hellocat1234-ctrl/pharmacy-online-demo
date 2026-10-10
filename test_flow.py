@@ -1,9 +1,10 @@
-"""ทดสอบ 1 รอบเต็ม + กรณีปฏิเสธ + คิวรอ/VIP ผ่าน route ของ Flask กับฐานข้อมูล Oracle จริง
+"""ทดสอบ 1 รอบเต็ม + กรณีปฏิเสธ + คิวรอ/VIP + ตัวนับเวลาตอบกลับ ผ่าน route ของ Flask กับฐานข้อมูล Oracle จริง
 
 รัน reset.bat ก่อน แล้วสั่ง:  python test_flow.py
 (สคริปต์นี้สร้างข้อมูลทดสอบจริงในฐานข้อมูล ต้องรัน reset.bat อีกครั้งก่อน Demo)
 คนไข้ 1-3 เป็นสมาชิกทั่วไป คนไข้ 4 เป็น VIP, เภสัชกร 1-2 ถือห้องเปิดได้คนละ 1 ห้อง
 """
+import re
 import sys
 
 import db
@@ -260,6 +261,130 @@ check("เกิน 10 นาทีจริง: polling ปิดห้อง�
 reply(1, info2["chat_id"])
 r = client.post(f"/pharmacist/1/chat/{info2['chat_id']}/expire")
 check("ห้องที่เภสัชกรตอบแล้วไม่ถูกนับว่าหมดเวลา", chat_state(info2["chat_id"]) == "consulting" and "ไม่นับว่าหมดเวลา" in r.get_data(as_text=True))
+
+print("\n=== รอบที่ 4 : ตัวนับเวลาเริ่มใหม่ทุกข้อความ (เภสัชกร 10 นาที / คนไข้ 5 นาที) ===")
+
+
+def timer(chat_id):
+    """(ฝ่ายที่ต้องตอบ, วินาทีที่เหลือ) ที่ API polling ส่งให้หน้าแชท"""
+    data = client.get(f"/api/chat/{chat_id}/messages?after=999999").get_json()
+    return data["turn"], data["seconds_left"]
+
+
+def rewind(chat_id, minutes):
+    """ย้อนเวลาเริ่มห้องและเวลาส่งของทุกข้อความในห้อง เพื่อจำลองว่าเวลาผ่านไปแล้ว"""
+    with db.connect() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE chat_room SET started_at = started_at - NUMTODSINTERVAL(:m, 'MINUTE') WHERE chat_id = :c", m=minutes, c=chat_id)
+        cur.execute("UPDATE chat_message SET sent_at = sent_at - NUMTODSINTERVAL(:m, 'MINUTE') WHERE chat_id = :c", m=minutes, c=chat_id)
+        conn.commit()
+
+
+def say(chat_id, sender, text):
+    return client.post(f"/api/chat/{chat_id}/messages", json={"sender_type": sender, "content": text})
+
+
+def message_count(chat_id):
+    return scalar("SELECT COUNT(*) FROM chat_message WHERE chat_id = :c", c=chat_id)
+
+
+# เคลียร์ห้องที่ค้างจากรอบที่ 3 ให้เภสัชกรว่างทั้งสองคน
+reply(2, info4["chat_id"]); close(2, info4["chat_id"]); close(1, info2["chat_id"])
+check("เริ่มรอบ: ไม่มีห้องเปิดและไม่มีคิวรอ", open_chats() == {} and scalar("SELECT COUNT(*) FROM consult_queue WHERE status = 'waiting'") == 0)
+
+client.post("/patient/3/queue")
+room_a = latest(3); chat_t1, ph_a = room_a["chat_id"], room_a["pharmacist_id"]
+turn, left = timer(chat_t1)
+check("ห้องใหม่ยังไม่มีข้อความ: ตาเภสัชกร นับ 10 นาทีจากเวลาสร้างห้อง", turn == "pharmacist" and 590 <= left <= 600, f"({turn}, {left} วินาที)")
+rewind(chat_t1, 4)
+check("เวลาผ่านไป 4 นาที: เหลือประมาณ 6 นาที", 350 <= timer(chat_t1)[1] <= 360, f"({timer(chat_t1)[1]} วินาที)")
+r = say(chat_t1, "patient", "ปวดท้องค่ะ")
+turn, left = timer(chat_t1)
+check("คนไข้ส่งข้อความ: ตัวนับเภสัชกรเริ่มใหม่ 10 นาทีจากข้อความล่าสุดของคนไข้", r.status_code == 200 and turn == "pharmacist" and 590 <= left <= 600, f"({turn}, {left} วินาที)")
+
+page_f = client.get(f"/pharmacist/{ph_a}/chat/{chat_t1}").get_data(as_text=True)
+page_p = client.get(f"/patient/3/chat/{chat_t1}").get_data(as_text=True)
+check("หน้าแชทเภสัชกร (ฝ่ายที่ต้องตอบ): 'ต้องตอบภายใน' + ปุ่มทดสอบ", 'id="reply-timer"' in page_f and "timer-mine flex" in page_f
+      and ">ต้องตอบภายใน</span>" in page_f and "ทดสอบ: เภสัชกรหมดเวลา" in page_f)
+check("หน้าแชทคนไข้ (อีกฝ่าย): 'รอเภสัชกรตอบกลับ' + ปุ่มทดสอบ", 'id="reply-timer"' in page_p and ">รอเภสัชกรตอบกลับ</span>" in page_p
+      and "timer-mine flex" not in page_p and "ทดสอบ: เภสัชกรหมดเวลา" in page_p)
+
+r = say(chat_t1, "pharmacist", "ปวดมากี่วันแล้วครับ")
+turn, left = timer(chat_t1)
+check("เภสัชกรตอบ: ตัวนับคนไข้ 5 นาทีเริ่ม", r.status_code == 200 and turn == "patient" and 290 <= left <= 300, f"({turn}, {left} วินาที)")
+page_p = client.get(f"/patient/3/chat/{chat_t1}").get_data(as_text=True)
+page_f = client.get(f"/pharmacist/{ph_a}/chat/{chat_t1}").get_data(as_text=True)
+check("สลับฝั่ง: คนไข้เห็น 'ต้องตอบภายใน' เภสัชกรเห็น 'รอคนไข้ตอบกลับ'", ">ต้องตอบภายใน</span>" in page_p and "timer-mine flex" in page_p
+      and ">รอคนไข้ตอบกลับ</span>" in page_f and "ทดสอบ: คนไข้หมดเวลา" in page_f)
+home = client.get(f"/pharmacist/{ph_a}").get_data(as_text=True)
+check("หน้ารายการห้อง: ห้องที่รอคนไข้ตอบไม่อยู่ในตารางรอตอบกลับ และมีตัวนับ 'รอคนไข้ตอบ'", "ห้องแชทที่รอตอบกลับ (0)" in home and "รอคนไข้ตอบ" in home)
+
+rewind(chat_t1, 2)
+check("เวลาผ่านไป 2 นาที: คนไข้เหลือประมาณ 3 นาที", 170 <= timer(chat_t1)[1] <= 180, f"({timer(chat_t1)[1]} วินาที)")
+r = say(chat_t1, "patient", "2 วันแล้วค่ะ")
+turn, left = timer(chat_t1)
+check("คนไข้ตอบ: ตัวนับเภสัชกรรีเซ็ตเป็น 10 นาที", r.status_code == 200 and turn == "pharmacist" and 590 <= left <= 600, f"({turn}, {left} วินาที)")
+home = client.get(f"/pharmacist/{ph_a}").get_data(as_text=True)
+check("หน้ารายการห้อง: ห้องระหว่างปรึกษาที่รอเภสัชกรตอบ กลับมาอยู่ในตารางรอตอบกลับพร้อมตัวนับ",
+      "ห้องแชทที่รอตอบกลับ (1)" in home and chat_state(chat_t1) == "consulting" and re.search(r'class="countdown" data-seconds="(59\d|600)"', home) is not None)
+
+print("\n--- หมดเวลา: ข้อความถูกปฏิเสธฝั่งเซิร์ฟเวอร์ และคิวถัดไปได้ห้อง ---")
+client.post("/patient/1/queue")
+room_b = latest(1); chat_t2, ph_b = room_b["chat_id"], room_b["pharmacist_id"]
+client.post("/patient/2/queue"); client.post("/patient/4/queue")
+check("เภสัชกรเต็มทั้งสองคน มีคิวรอ 2 คิว (คนไข้ 2 ทั่วไป, คนไข้ 4 VIP)", {ph_a, ph_b} == {1, 2}
+      and latest(2)["queue"] == "waiting" and latest(4)["queue"] == "waiting" and position(4) == 1 and position(2) == 2)
+
+rewind(chat_t1, 11)                                  # เภสัชกร ph_a ไม่ตอบคนไข้ 3 เกิน 10 นาที
+before_msgs = message_count(chat_t1)
+r = say(chat_t1, "pharmacist", "ขออภัยที่ตอบช้าครับ")
+info = latest(3)
+check("เภสัชกรส่งหลังเกิน 10 นาที: เซิร์ฟเวอร์ปฏิเสธ (409) ข้อความไม่ถูกบันทึก", r.status_code == 409
+      and "เภสัชกรไม่ได้ตอบภายใน 10 นาที" in r.get_json()["error"] and message_count(chat_t1) == before_msgs, r.get_json()["error"])
+check("เภสัชกรหมดเวลา -> 'ให้คำปรึกษาไม่สำเร็จ' (chat closed, คิว cancelled)", info["chat"] == "closed" and info["queue"] == "cancelled"
+      and chat_state(chat_t1) == "failed", str(info))
+info4 = latest(4)
+check("หมดเวลาแล้วคิวถัดไป (VIP คนไข้ 4) ได้ห้องกับเภสัชกรคนเดิมใน Transaction เดียวกัน", info4["queue"] == "in_progress"
+      and info4["pharmacist_id"] == ph_a and info4["chat"] == "open" and latest(2)["queue"] == "waiting" and position(2) == 1, str(info4))
+r = say(chat_t1, "patient", "ยังอยู่ไหมคะ")
+check("ห้องที่หมดเวลาแล้ว ส่งข้อความต่อไม่ได้ทั้งสองฝ่าย", r.status_code == 409 and message_count(chat_t1) == before_msgs, r.get_json()["error"])
+
+say(chat_t2, "pharmacist", "สวัสดีครับ มีอาการอะไรครับ")   # ตาคนไข้ 1
+rewind(chat_t2, 6)                                   # คนไข้ 1 ไม่ตอบเกิน 5 นาที
+before_msgs = message_count(chat_t2)
+r = say(chat_t2, "patient", "ขอโทษค่ะ เพิ่งเห็น")
+info = latest(1)
+check("คนไข้ส่งหลังเกิน 5 นาที: เซิร์ฟเวอร์ปฏิเสธ (409) ข้อความไม่ถูกบันทึก", r.status_code == 409
+      and "คนไข้ไม่ได้ตอบภายใน 5 นาที" in r.get_json()["error"] and message_count(chat_t2) == before_msgs, r.get_json()["error"])
+check("คนไข้หมดเวลา -> 'ปิดห้องแชทแล้ว' (chat closed, คิว completed)", info["chat"] == "closed" and info["queue"] == "completed"
+      and chat_state(chat_t2) == "closed", str(info))
+info2 = latest(2)
+check("คนไข้หมดเวลาแล้วคิวถัดไป (คนไข้ 2) ได้ห้องกับเภสัชกรที่ว่างลง", info2["queue"] == "in_progress" and info2["pharmacist_id"] == ph_b
+      and info2["chat"] == "open", str(info2))
+r = say(chat_t2, "pharmacist", "ยังอยู่ไหมครับ")
+check("ห้องที่คนไข้หมดเวลาแล้ว เภสัชกรก็ส่งต่อไม่ได้", r.status_code == 409 and message_count(chat_t2) == before_msgs)
+
+print("\n--- ปุ่มทดสอบหมดเวลา ทั้งสองฝั่ง และการหมดเวลาจริงผ่าน polling ---")
+chat_v, chat_g = info4["chat_id"], info2["chat_id"]  # ห้องของคนไข้ 4 (กับ ph_a) และคนไข้ 2 (กับ ph_b) ยังไม่มีข้อความ
+r = client.post(f"/patient/4/chat/{chat_v}/expire", data={"side": "patient"})
+check("ปุ่มทดสอบ 'คนไข้หมดเวลา' ตอนเป็นตาเภสัชกร: ไม่มีผล", r.status_code == 302 and latest(4)["chat"] == "open")
+say(chat_v, "pharmacist", "สวัสดีครับ")
+r = client.post(f"/patient/4/chat/{chat_v}/expire", data={"side": "patient"})
+info = latest(4)
+check("ปุ่มทดสอบ 'คนไข้หมดเวลา' (กดจากฝั่งคนไข้): ห้องปิดเป็น 'ปิดห้องแชทแล้ว'", r.status_code == 302 and r.location.endswith(f"/patient/4/chat/{chat_v}")
+      and info["chat"] == "closed" and info["queue"] == "completed" and chat_state(chat_v) == "closed", str(info))
+r = client.post(f"/pharmacist/{ph_b}/chat/{chat_g}/expire", data={"side": "pharmacist"})
+info = latest(2)
+check("ปุ่มทดสอบ 'เภสัชกรหมดเวลา' (กดจากหน้าแชทเภสัชกร): 'ให้คำปรึกษาไม่สำเร็จ'", r.status_code == 302 and info["chat"] == "closed"
+      and info["queue"] == "cancelled" and chat_state(chat_g) == "failed", str(info))
+
+client.post("/patient/3/queue")
+chat_w = latest(3)["chat_id"]; ph_w = latest(3)["pharmacist_id"]
+say(chat_w, "pharmacist", "สวัสดีครับ")
+rewind(chat_w, 6)
+client.get(f"/api/pharmacist/{ph_w}/state")          # polling ของหน้ารายการห้อง
+check("คนไข้เกิน 5 นาทีจริง: polling ปิดห้องให้อัตโนมัติเป็น 'ปิดห้องแชทแล้ว'", chat_state(chat_w) == "closed" and latest(3)["queue"] == "completed")
+check("จบรอบ: ไม่มีห้องเปิดค้าง", open_chats() == {})
 
 print("\n=== หน้าจออื่น ๆ ===")
 for url in ["/", "/patient/1", "/patient/2", "/patient/3", "/patient/4", "/pharmacist/1", "/pharmacist/2",
