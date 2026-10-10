@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <div class="card-header">5. ประวัติคำสั่งซื้อ</div>
+  <table class="table mb-0 align-middle">
+    <thead><tr><th>เลขที่</th><th>วันที่สั่ง</th><th>รายการ</th><th class="text-end">ยอดรวม (บาท)</th><th>สถานะ</th><th>ชำระโดย</th><th>ใบเสร็จ</th><th></th></tr></thead>
+    <tbody>
+      {% for o in orders %}
+      <tr>
+        <td>{{ o.order_id }}</td>
+        <td>{{ o.ordered_at }}</td>
+        <td>{{ o['items'] }}</td>
+        <td class="text-end">{{ o.total|baht }}</td>
+        <td><span class="badge {{ 'bg-warning text-dark' if o.status == 'pending_payment' else 'bg-success' }}">{{ o.status|th }}</span></td>
+        <td>{{ o.method|th if o.method else '-' }}</td>
+        <td>{{ o.receipt_no or '-' }}</td>
+        <td class="text-end">
+          {% if o.status == 'pending_payment' %}
+            <a class="btn btn-sm btn-primary" href="{{ url_for('patient_pay', pid=patient.patient_id, order_id=o.order_id) }}">ชำระเงิน</a>
+          {% else %}
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('patient_receipt', pid=patient.patient_id, order_id=o.order_id) }}">ใบเสร็จ</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-muted">ยังไม่มีคำสั่งซื้อ</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

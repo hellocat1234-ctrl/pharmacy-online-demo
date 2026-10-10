@@ -1,0 +1,273 @@
+<!DOCTYPE html><html lang="th" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>ชำระเงิน (คนไข้) - Pharmacy Online</title>
+<!-- Google Font: Prompt / Sarabun -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS CDN v3 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration -->
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Prompt', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              teal: '#0d9488',
+              tealDark: '#0f766e',
+              tealLight: '#f0fdfa',
+              blue: '#0284c7',
+              blueDark: '#0369a1',
+            }
+          }
+        }
+      }
+    }
+  </script>
+<!-- BEGIN: Custom Styles -->
+<style data-purpose="base-typography">
+    body {
+      font-family: 'Prompt', sans-serif;
+      background-color: #f1f5f9;
+      color: #334155;
+    }
+  </style>
+<style data-purpose="custom-components">
+    /* Subtle custom card borders and shadows */
+    .dashboard-card {
+      background: #ffffff;
+      border-radius: 0.75rem;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+    }
+  </style>
+<!-- END: Custom Styles -->
+</head>
+<body class="min-h-screen flex flex-col bg-slate-100 text-slate-700 antialiased">
+<!-- BEGIN: MainNavbar -->
+<!-- แถบนำทางด้านบนตามรูปหมายเลข 7 -->
+<header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs" data-purpose="main-header">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+<div class="flex items-center justify-between h-16">
+<!-- โลโก้ Pharmacy Online -->
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-teal-600 flex items-center justify-center text-white shadow-sm shadow-teal-200">
+<!-- Icon ยา / กากบาทแพทย์ -->
+<svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+<path d="M19 10.5h-5.5V5c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v5.5H5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h5.5V19c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-5.5H19c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z"></path>
+</svg>
+</div>
+<span class="text-xl font-bold text-teal-800 tracking-tight">Pharmacy Online</span>
+</div>
+<!-- รายการเมนูหลักตรงกลาง -->
+<nav class="hidden md:flex items-center space-x-6 text-sm font-medium text-slate-600">
+<a class="inline-flex items-center gap-2 hover:text-teal-700 transition-colors" href="#">
+<svg class="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="">คิวแชทของเภสัชกร</span>
+</a>
+<a class="inline-flex items-center gap-2 hover:text-teal-700 transition-colors" href="#">
+<svg class="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="">สต็อกยา</span>
+</a>
+<a class="inline-flex items-center gap-2 hover:text-teal-700 transition-colors" href="#">
+<svg class="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="">เปลี่ยนบทบาท</span>
+</a>
+</nav>
+<!-- โปรไฟล์ผู้ใช้งานขวาสุด -->
+<div class="flex items-center gap-2.5">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200">
+<div class="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center font-semibold text-xs">
+<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+<path clip-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" fill-rule="evenodd"></path>
+</svg>
+</div>
+<span class="text-xs sm:text-sm font-medium text-slate-700">Pharmacy Online</span>
+<svg class="w-3.5 h-3.5 text-slate-400 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+</div>
+</div>
+</div>
+</header>
+<!-- END: MainNavbar -->
+<!-- BEGIN: MainContent -->
+<!-- ส่วนเนื้อหาของหน้าชำระเงิน (คนไข้) -->
+<main class="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8" data-purpose="checkout-content">
+<!-- Card คอนเทนเนอร์หลัก -->
+<div class="dashboard-card p-5 sm:p-7 space-y-6">
+<!-- ส่วนหัวข้อคำสั่งซื้อและสถานะ -->
+<!-- BEGIN: OrderHeader -->
+<div class="flex flex-wrap items-center justify-between border-b border-slate-100 pb-4 gap-3">
+<div class="flex items-center gap-3">
+<!-- ไอคอนเอกสารคำสั่งซื้อ -->
+<div class="text-teal-600">
+<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<h1 class="text-lg sm:text-xl font-bold text-slate-800">คำสั่งซื้อเลขที่ 00045</h1>
+<!-- Badge สถานะ รอชำระเงิน -->
+<span class="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+            รอชำระเงิน
+          </span>
+</div>
+</div>
+<!-- END: OrderHeader -->
+<!-- เนื้อหาแบ่งเป็น 2 คอลัมน์หลัก: ตารางรายการยา (ซ้าย) + ช่องทางชำระเงิน (ขวา) -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+<!-- BEGIN: MedicineItemsTable -->
+<!-- ฝั่งซ้าย: ตารางรายการยาและราคารวม -->
+<div class="lg:col-span-7 overflow-hidden border border-slate-200 rounded-lg bg-white shadow-xs" data-purpose="medicine-table-container">
+<div class="overflow-x-auto">
+<table class="w-full text-sm text-left text-slate-600 border-collapse">
+<thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+<tr>
+<th class="py-2.5 px-3 text-center w-10" scope="col">#</th>
+<th class="py-2.5 px-4 font-semibold text-slate-700" scope="col">ยา</th>
+<th class="py-2.5 px-3 text-center font-semibold text-slate-700" scope="col">จำนวน</th>
+<th class="py-2.5 px-3 text-right font-semibold text-slate-700" scope="col">ราคา/หน่วย</th>
+<th class="py-2.5 px-4 text-right font-semibold text-slate-700" scope="col">รวม</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-100 text-sm">
+<!-- แถวที่ 1 -->
+<tr class="hover:bg-slate-50/70 transition-colors">
+<td class="py-3 px-3 text-center font-medium text-slate-500">1</td>
+<td class="py-3 px-4 font-medium text-slate-800">พาราเซตามอล</td>
+<td class="py-3 px-3 text-center">10</td>
+<td class="py-3 px-3 text-right">2.00</td>
+<td class="py-3 px-4 text-right font-semibold text-slate-800">20.00</td>
+</tr>
+<!-- แถวที่ 2 -->
+<tr class="hover:bg-slate-50/70 transition-colors">
+<td class="py-3 px-3 text-center font-medium text-slate-500">2</td>
+<td class="py-3 px-4 font-medium text-slate-800">วิตามินซี</td>
+<td class="py-3 px-3 text-center">5</td>
+<td class="py-3 px-3 text-right">12.00</td>
+<td class="py-3 px-4 text-right font-semibold text-slate-800">60.00</td>
+</tr>
+</tbody>
+<!-- แถวสรุปรวมทั้งสิ้น -->
+<tfoot class="border-t border-slate-200 bg-slate-50/60 font-semibold text-slate-800">
+<tr>
+<td class="py-3 px-4 text-right text-slate-600" colspan="4">รวมทั้งสิ้น</td>
+<td class="py-3 px-4 text-right text-teal-700 font-bold text-base">80.00</td>
+</tr>
+</tfoot>
+</table>
+</div>
+</div>
+<!-- END: MedicineItemsTable -->
+<!-- BEGIN: PaymentMethodsSection -->
+<!-- ฝั่งขวา: ตัวเลือกการชำระเงิน (QR Code & โอนผ่านธนาคาร) -->
+<div class="lg:col-span-5 border border-slate-200 rounded-lg p-4 bg-white space-y-5" data-purpose="payment-methods">
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+<!-- วิธีที่ 1: สแกน QR จำลอง -->
+<!-- BEGIN: QRCodePayment -->
+<div class="flex flex-col items-center text-center p-3 rounded-lg border border-slate-100 bg-slate-50/50" data-purpose="qr-payment-card">
+<span class="text-xs font-medium text-slate-700 mb-2">สแกน QR เพื่อชำระเงิน</span>
+<!-- QR Code จำลอง SVG -->
+<div class="p-2 bg-white border border-slate-300 rounded shadow-xs mb-3">
+<svg class="w-24 h-24 text-slate-900" fill="currentColor" viewBox="0 0 100 100">
+<!-- Pattern จำลองของ QR Code -->
+<rect fill="none" height="28" stroke="currentColor" stroke-width="6" width="28" x="5" y="5"></rect>
+<rect height="12" width="12" x="13" y="13"></rect>
+<rect fill="none" height="28" stroke="currentColor" stroke-width="6" width="28" x="67" y="5"></rect>
+<rect height="12" width="12" x="75" y="13"></rect>
+<rect fill="none" height="28" stroke="currentColor" stroke-width="6" width="28" x="5" y="67"></rect>
+<rect height="12" width="12" x="13" y="75"></rect>
+<!-- Data Dots Matrix -->
+<rect height="6" width="6" x="42" y="8"></rect>
+<rect height="6" width="6" x="52" y="18"></rect>
+<rect height="6" width="6" x="42" y="28"></rect>
+<rect height="6" width="6" x="8" y="44"></rect>
+<rect height="6" width="6" x="22" y="44"></rect>
+<rect height="6" width="6" x="15" y="54"></rect>
+<rect height="10" width="10" x="45" y="45"></rect>
+<rect height="6" width="6" x="62" y="44"></rect>
+<rect height="6" width="6" x="80" y="44"></rect>
+<rect height="6" width="6" x="72" y="54"></rect>
+<rect height="6" width="6" x="44" y="65"></rect>
+<rect height="6" width="6" x="54" y="75"></rect>
+<rect height="6" width="6" x="44" y="85"></rect>
+<rect height="6" width="6" x="72" y="72"></rect>
+<rect height="6" width="6" x="82" y="82"></rect>
+</svg>
+</div>
+<!-- ปุ่มจำลองการชำระเงิน -->
+<button class="w-full mt-auto py-2 px-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition shadow-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400" type="button">ชำระเงิน
+              </button>
+</div>
+<!-- END: QRCodePayment -->
+<!-- วิธีที่ 2: โอนผ่านธนาคาร จำลอง -->
+<!-- BEGIN: BankTransferPayment -->
+<div class="flex flex-col text-center p-3 rounded-lg border border-slate-100 bg-slate-50/50 justify-between" data-purpose="bank-payment-card">
+<div>
+<span class="text-xs font-medium text-slate-700 block mb-3">โอนเงินผ่านธนาคาร</span>
+<!-- ตัวเลือกธนาคาร -->
+<div class="text-left mb-4">
+<label class="sr-only" for="bankSelect">เลือกธนาคาร</label>
+<select class="w-full text-xs border-slate-300 rounded-md py-1.5 px-2 bg-white text-slate-700 focus:border-blue-500 focus:ring-blue-500" id="bankSelect">
+<option value="">เลือกธนาคาร</option>
+<option value="kbank">ธนาคารกสิกรไทย</option>
+<option value="scb">ธนาคารไทยพาณิชย์</option>
+<option value="bbl">ธนาคารกรุงเทพ</option>
+<option value="ktb">ธนาคารกรุงไทย</option>
+</select>
+</div>
+</div>
+<!-- ปุ่มจำลองการโอนเงินและแนบสลิป -->
+<button class="w-full py-2 px-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition shadow-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400 leading-snug" type="button">โอนเงินและแนบสลิป
+              </button>
+</div>
+<!-- END: BankTransferPayment -->
+</div>
+</div>
+<!-- END: PaymentMethodsSection -->
+</div>
+<!-- BEGIN: ShippingAddress -->
+<!-- ส่วนแสดงที่อยู่จัดส่งสินค้าด้านล่างตามต้นฉบับ -->
+<div class="pt-4 border-t border-slate-100 flex items-start sm:items-center text-xs sm:text-sm text-slate-600" data-purpose="shipping-address-container">
+<svg class="w-4 h-4 text-teal-600 mr-2 shrink-0 mt-0.5 sm:mt-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+<path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<p class="leading-relaxed">
+<span class="font-semibold text-slate-700">จัดส่งที่:</span> 
+          123/45 ถนนมิตรภาพ ตำบลในเมือง อำเภอเมืองขอนแก่น จังหวัดขอนแก่น 40000
+        </p>
+</div>
+<!-- END: ShippingAddress -->
+</div>
+</main>
+<!-- END: MainContent -->
+<!-- BEGIN: SimpleInteractivity -->
+<script data-purpose="event-handlers">
+    document.addEventListener('DOMContentLoaded', () => {
+      // Mock interaction for payment action buttons
+      const buttons = document.querySelectorAll('button');
+      buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const actionText = btn.textContent.trim();
+          alert(`กำลังดำเนินการ: "${actionText}" (ระบบจำลอง)`);
+        });
+      });
+    });
+  </script>
+<!-- END: SimpleInteractivity -->
+
+
+</body></html>

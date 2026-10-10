@@ -1,0 +1,183 @@
+<!DOCTYPE html><html lang="th" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>ใบสั่งยา + สั่งซื้อ (คนไข้) - Pharmacy Online</title>
+<!-- Google Fonts: Sarabun & Kanit for Authentic Thai Healthcare UI -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;500;600&amp;family=Sarabun:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS CDN with plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<style data-purpose="typography">
+    body {
+      font-family: 'Sarabun', sans-serif;
+    }
+    .heading-font {
+      font-family: 'Kanit', sans-serif;
+    }
+  </style>
+<style data-purpose="custom-styling">
+    /* Subtle theme custom styling to match medical platform specifications */
+    .table-cell-border {
+      border-color: #f1f5f9;
+    }
+  </style>
+</head>
+<body class="bg-[#f0f9f8] min-h-screen text-slate-800 antialiased flex flex-col justify-between">
+<!-- BEGIN: MainHeader -->
+<header class="bg-white border-b border-teal-100 shadow-sm sticky top-0 z-50">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+<!-- Logo & System Brand -->
+<div class="flex items-center space-x-3">
+<div class="w-8 h-8 rounded-full bg-teal-600 flex items-center justify-center text-white shadow-sm">
+<svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+<path d="M19 10.5h-5.5V5c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v5.5H5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h5.5V19c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-5.5H19c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z"></path>
+</svg>
+</div>
+<span class="text-xl font-bold text-teal-700 tracking-tight heading-font">Pharmacy Online</span>
+</div>
+<!-- Navigation Links -->
+<nav class="hidden md:flex items-center space-x-6 text-sm text-slate-600 font-medium">
+<a class="flex items-center text-teal-700 hover:text-teal-800 transition-colors" href="#">
+<svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+          หน้าหลัก
+        </a>
+<a class="flex items-center hover:text-teal-700 transition-colors" href="#">
+<svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+          ประวัติคำสั่งซื้อ
+        </a>
+<a class="flex items-center hover:text-teal-700 transition-colors" href="#">
+<svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+          เปลี่ยนบทบาท
+        </a>
+</nav>
+<!-- User Profile Badge -->
+<div class="flex items-center space-x-2 text-sm text-slate-700 bg-slate-50 border border-slate-200 py-1.5 px-3 rounded-full">
+<div class="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center font-bold text-xs">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="font-medium text-slate-700">นางสาวน้ำหวาน</span>
+<svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+</div>
+</header>
+<!-- END: MainHeader -->
+<!-- BEGIN: MainContent -->
+<main class="flex-grow max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 md:py-8" data-purpose="prescription-order-container">
+<!-- White Card Container for Prescription Order Form -->
+<div class="bg-white rounded-xl shadow-sm border border-teal-100/80 p-6 md:p-8">
+<!-- Top Section: Prescription Metadata & Pharmacist Info & Shipping Address -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-6 items-start pb-6 border-b border-slate-100">
+<!-- Left Column: Prescription Number & Date -->
+<div class="md:col-span-4 flex items-start space-x-3.5">
+<div class="p-2.5 bg-blue-50 text-blue-600 rounded-lg shrink-0">
+<svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path>
+</svg>
+</div>
+<div>
+<h1 class="text-xl font-bold text-slate-800 heading-font leading-tight">ใบสั่งยาเลขที่ 00123</h1>
+<p class="text-xs text-slate-500 mt-1">20 ต.ค. 2568 &nbsp;เวลา 10:15</p>
+</div>
+</div>
+<!-- Middle Column: Pharmacy & Dispensing Pharmacist -->
+<div class="md:col-span-3 text-left md:text-left">
+<div class="flex items-center space-x-1.5 text-teal-800 font-semibold text-sm">
+<svg class="w-4 h-4 text-teal-600" fill="currentColor" viewBox="0 0 24 24">
+<path d="M4.5 10.5C3.67 10.5 3 11.17 3 12s.67 1.5 1.5 1.5h15c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5h-15z"></path>
+<path d="M10.5 4.5C10.5 3.67 11.17 3 12 3s1.5.67 1.5 1.5v15c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5v-15z"></path>
+</svg>
+<span class="heading-font">Pharmacy Online</span>
+</div>
+<p class="text-xs text-slate-500 mt-1">เภสัชกร: <span class="text-slate-700 font-medium">ภก. สมฤดี</span></p>
+</div>
+<!-- Right Column: Shipping Destination Card -->
+<div class="md:col-span-5 bg-slate-50/80 rounded-lg p-3.5 border border-slate-200/70 text-xs">
+<div class="font-semibold text-slate-700 flex items-center mb-1">
+<svg class="w-3.5 h-3.5 text-slate-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+<path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="">ที่อยู่จัดส่ง <span class="text-slate-400 font-normal">(ใช้ที่อยู่ของผู้ป่วย)</span></span>
+</div>
+<p class="text-slate-600 leading-relaxed pl-4.5">
+            123/45 ถนนมิตรภาพ ตำบลในเมือง<br>
+            อำเภอเมืองขอนแก่น จังหวัดขอนแก่น 40000
+          </p>
+</div>
+</div>
+<!-- Prescribed Medication Items Table -->
+<div class="mt-6 overflow-x-auto" data-purpose="medication-list">
+<table class="w-full text-left text-xs border-collapse">
+<thead>
+<tr class="bg-slate-50 border-y border-slate-200 text-slate-600 font-medium">
+<th class="py-2.5 px-3 text-center w-10" scope="col">#</th>
+<th class="py-2.5 px-4 min-w-[140px]" scope="col">ยา</th>
+<th class="py-2.5 px-4 text-center min-w-[90px]" scope="col">ขนาดยา</th>
+<th class="py-2.5 px-4 min-w-[200px]" scope="col">วิธีใช้</th>
+<th class="py-2.5 px-3 text-center w-16" scope="col">จำนวน</th>
+<th class="py-2.5 px-4 text-right w-24" scope="col">ราคา/หน่วย</th>
+<th class="py-2.5 px-4 text-right w-24" scope="col">รวม</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-100 text-slate-700">
+<!-- Item 1: Paracetamol -->
+<tr class="hover:bg-slate-50/50 transition-colors">
+<td class="py-3 px-3 text-center text-slate-400">1</td>
+<td class="py-3 px-4 font-medium text-slate-800">พาราเซตามอล</td>
+<td class="py-3 px-4 text-center text-slate-600">500 mg</td>
+<td class="py-3 px-4 text-slate-600">รับประทานครั้งละ 1 เม็ด</td>
+<td class="py-3 px-3 text-center font-medium">10</td>
+<td class="py-3 px-4 text-right tabular-nums">2.00</td>
+<td class="py-3 px-4 text-right font-medium tabular-nums">20.00</td>
+</tr>
+<!-- Item 2: Vitamin C -->
+<tr class="hover:bg-slate-50/50 transition-colors">
+<td class="py-3 px-3 text-center text-slate-400">2</td>
+<td class="py-3 px-4 font-medium text-slate-800">วิตามินซี</td>
+<td class="py-3 px-4 text-center text-slate-600">500 mg</td>
+<td class="py-3 px-4 text-slate-600">รับประทานวันละ 1 เม็ด</td>
+<td class="py-3 px-3 text-center font-medium">5</td>
+<td class="py-3 px-4 text-right tabular-nums">12.00</td>
+<td class="py-3 px-4 text-right font-medium tabular-nums">60.00</td>
+</tr>
+</tbody>
+<tfoot>
+<!-- Total Price Row -->
+<tr class="border-t border-slate-200 font-semibold text-slate-800 bg-slate-50/40">
+<td class="py-2.5" colspan="5"></td>
+<td class="py-2.5 px-4 text-right text-slate-600">ยอดรวม</td>
+<td class="py-2.5 px-4 text-right text-teal-700 font-bold tabular-nums">80.00</td>
+</tr>
+</tfoot>
+</table>
+</div>
+<!-- Action Footer: Order Button -->
+<div class="mt-8 flex justify-end">
+<button class="bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white font-medium text-sm px-10 py-2.5 rounded-lg shadow hover:shadow-md transition duration-150 ease-in-out cursor-pointer heading-font" type="button">
+          สั่งซื้อ
+        </button>
+</div>
+</div>
+<!-- BEGIN: SystemStockWarningAlert -->
+<!-- Alert Banner matching UI image footer error notification -->
+
+<!-- END: SystemStockWarningAlert -->
+</main>
+<!-- END: MainContent -->
+<!-- BEGIN: SiteFooter -->
+<footer class="py-4 text-center text-xs text-slate-400">
+<p class="">© 2025 Pharmacy Online System. All rights reserved.</p>
+</footer>
+<!-- END: SiteFooter -->
+</body></html>

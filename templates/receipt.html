@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="alert alert-success">ชำระเงินสำเร็จ คำสั่งซื้อเลขที่ {{ receipt.order_id }} มีสถานะ “{{ receipt.order_status|th }}”</div>
+<div class="card mx-auto" style="max-width: 760px">
+  <div class="card-body p-4">
+    <div class="d-flex justify-content-between">
+      <div>
+        <h4 class="mb-1">ใบเสร็จรับเงิน</h4>
+        <div>{{ receipt.pharmacy_name }}</div>
+        <small class="text-muted">{{ receipt.pharmacy_address }}<br>ใบอนุญาตเลขที่ {{ receipt.license_no }}</small>
+      </div>
+      <div class="text-end">
+        <div class="fs-5">{{ receipt.receipt_no }}</div>
+        <small class="text-muted">วันที่ให้บริการ {{ receipt.service_date }}<br>ออกเมื่อ {{ receipt.issued_at }}</small>
+      </div>
+    </div>
+    <hr>
+    <p class="mb-1">ลูกค้า: {{ patient.full_name }}</p>
+    <p class="text-muted">จัดส่งที่: {{ receipt.shipping_address }}</p>
+    <table class="table">
+      <thead><tr><th>#</th><th>ยา</th><th>ขนาดยา</th><th class="text-end">จำนวน</th><th class="text-end">ราคา/หน่วย</th><th class="text-end">รวม (บาท)</th></tr></thead>
+      <tbody>
+        {% for l in lines %}
+        <tr><td>{{ l.line_no }}</td><td>{{ l.drug_name }}</td><td>{{ l.dosage or '-' }}</td><td class="text-end">{{ l.quantity }}</td>
+            <td class="text-end">{{ l.unit_price|baht }}</td><td class="text-end">{{ l.total_amount|baht }}</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot><tr><th colspan="5" class="text-end">รวมทั้งสิ้น</th><th class="text-end fs-5">{{ total|baht }}</th></tr></tfoot>
+    </table>
+    <p class="mb-0">
+      ชำระโดย: {{ receipt.method|th }} · สถานะ {{ receipt.payment_status|th }} · {{ receipt.paid_at }}
+      {% if receipt.transaction_no %}<br><small class="text-muted">เลขที่รายการ {{ receipt.transaction_no }} · {{ receipt.bank_name }}</small>{% endif %}
+      {% if receipt.qr_id %}<br><small class="text-muted">QR เลขที่ {{ receipt.qr_id }}</small>{% endif %}
+    </p>
+  </div>
+</div>
+<div class="text-center mt-3">
+  <a class="btn btn-primary" href="{{ url_for('patient_orders', pid=patient.patient_id) }}">ดูประวัติคำสั่งซื้อ</a>
+</div>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% macro state_badge(state) %}
+<span class="badge {{ {'waiting_reply': 'bg-warning text-dark', 'consulting': 'bg-success', 'failed': 'bg-danger'}.get(state, 'bg-secondary') }}">{{ state|th }}</span>
+{% endmacro %}
+{% block content %}
+{% set waiting = chats|selectattr('state', 'equalto', 'waiting_reply')|list %}
+{% set others = chats|rejectattr('state', 'equalto', 'waiting_reply')|list %}
+<div class="card mb-4">
+  <div class="card-header">6. ห้องแชทที่รอตอบกลับ ({{ waiting|length }}) <small class="text-muted">· ระบบจับคู่ให้อัตโนมัติ ต้องตอบภายใน 10 นาที</small></div>
+  <table class="table mb-0 align-middle">
+    <thead><tr><th>ห้อง</th><th>คิวที่</th><th>คนไข้</th><th>โรคประจำตัว</th><th>เริ่ม</th><th>เวลาที่เหลือ</th><th></th></tr></thead>
+    <tbody>
+      {% for c in waiting %}
+      <tr>
+        <td>{{ c.chat_id }}</td><td class="fs-5">{{ c.queue_no }}</td><td>{{ c.patient_name }}</td>
+        <td>{{ c.chronic_disease or '-' }}</td><td>{{ c.started_at }}</td>
+        <td><span class="countdown fs-5 fw-bold" data-seconds="{{ c.seconds_left }}"></span></td>
+        <td class="text-end text-nowrap">
+          <a class="btn btn-success" href="{{ url_for('pharmacist_chat', phid=pharmacist.pharmacist_id, chat_id=c.chat_id) }}">เปิดห้องแชท</a>
+          <form class="d-inline" method="post" action="{{ url_for('pharmacist_expire_chat', phid=pharmacist.pharmacist_id, chat_id=c.chat_id) }}">
+            <button class="btn btn-outline-danger btn-sm" title="ปุ่มทดสอบ: ถือว่าครบ 10 นาทีแล้วเภสัชกรไม่ตอบ">ทดสอบ: หมดเวลา</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-muted">ไม่มีห้องแชทที่รอตอบกลับ หน้านี้จะอัปเดตเองเมื่อระบบจับคู่คนไข้ให้</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="card">
+  <div class="card-header">ห้องแชทอื่นของฉัน</div>
+  <table class="table mb-0 align-middle">
+    <thead><tr><th>ห้อง</th><th>คิวที่</th><th>คนไข้</th><th>เริ่ม</th><th>สถานะ</th><th>ใบสั่งยา</th><th></th></tr></thead>
+    <tbody>
+      {% for c in others %}
+      <tr>
+        <td>{{ c.chat_id }}</td><td>{{ c.queue_no }}</td><td>{{ c.patient_name }}</td><td>{{ c.started_at }}</td>
+        <td>{{ state_badge(c.state) }}</td>
+        <td>{{ 'เลขที่ %s'|format(c.prescription_id) if c.prescription_id else '-' }}</td>
+        <td class="text-end"><a class="btn btn-sm btn-outline-success" href="{{ url_for('pharmacist_chat', phid=pharmacist.pharmacist_id, chat_id=c.chat_id) }}">เปิดห้อง</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-muted">ยังไม่มีห้องแชท</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='poll.js') }}"></script>
+<script>
+  reloadOnChange("{{ url_for('api_pharmacist_state', phid=pharmacist.pharmacist_id) }}", 2000);
+  startCountdowns();
+</script>
+{% endblock %}

@@ -1,0 +1,309 @@
+<!DOCTYPE html><html lang="th"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>ห้องแชท — Pharmacy Online (chat.html)</title>
+<!-- Tailwind CSS CDN with forms and container-queries plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Sarabun & Prompt for clean Thai UI typography -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&amp;family=Sarabun:wght@300;400;500;600&amp;display=swap" rel="stylesheet">
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Sarabun', 'sans-serif'],
+            prompt: ['Prompt', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              teal: '#0d9488',
+              'teal-dark': '#0f766e',
+              'teal-light': '#ccfbf1',
+              green: '#10b981',
+              'green-dark': '#059669',
+              blue: '#0284c7',
+              'blue-light': '#e0f2fe',
+              'blue-bubble': '#0284c7',
+              gray: '#f8fafc',
+            }
+          }
+        }
+      }
+    };
+  </script>
+<!-- BEGIN: Custom Styles -->
+<style data-purpose="base-typography">
+    body {
+      font-family: 'Sarabun', sans-serif;
+      background-color: #f1f5f9;
+      color: #1e293b;
+    }
+    h1, h2, h3, h4, h5, h6, .font-heading {
+      font-family: 'Prompt', sans-serif;
+    }
+  </style>
+<style data-purpose="scrollbar-styling">
+    /* Subtle custom scrollbar for conversation container */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background-color: #cbd5e1;
+      border-radius: 9999px;
+    }
+  </style>
+<!-- END: Custom Styles -->
+</head>
+<body class="min-h-screen flex flex-col bg-slate-100 text-slate-800">
+<!-- BEGIN: MainNavbar -->
+<header class="bg-white border-b border-slate-200 sticky top-0 z-30" data-purpose="main-navigation">
+<div class="max-w-[1440px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+<!-- Logo Branding -->
+<div class="flex items-center space-x-3">
+<div class="w-10 h-10 rounded-xl bg-teal-600 flex items-center justify-center text-white shadow-sm shadow-teal-200">
+<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+<path d="M19 10.5h-5.5V5c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v5.5H5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h5.5V19c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-5.5H19c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z"></path>
+</svg>
+</div>
+<div class="flex flex-col">
+<span class="text-xl font-bold tracking-tight text-teal-800 font-heading">Pharmacy Online</span>
+<span class="text-[11px] text-teal-600 font-normal leading-tight">ปรึกษาเภสัชกร สะดวก ปลอดภัย ใกล้คุณ</span>
+</div>
+</div>
+<!-- Navigation Tabs & User Profile -->
+<div class="flex items-center space-x-4 sm:space-x-6">
+<nav class="hidden md:flex items-center space-x-5 text-sm font-medium text-slate-600">
+<a class="hover:text-teal-600 transition flex items-center gap-1.5" href="#">
+<svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            คิวรอห้องแชท
+          </a>
+<a class="hover:text-teal-600 transition flex items-center gap-1.5" href="#">
+<svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            สต็อกยา
+          </a>
+<a class="hover:text-teal-600 transition flex items-center gap-1.5" href="#">
+<svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            เปลี่ยนบทบาท
+          </a>
+</nav>
+<!-- Pharmacist Profile Badge -->
+<div class="flex items-center pl-4 border-l border-slate-200">
+<div class="flex items-center space-x-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-100 transition cursor-pointer">
+<div class="w-7 h-7 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center font-bold text-xs">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-xs font-medium text-slate-700 font-heading">Pharmacy Online</span>
+<svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+</div>
+</div>
+</div>
+</header>
+<!-- END: MainNavbar -->
+<!-- BEGIN: MainContentArea -->
+<main class="flex-1 max-w-[1440px] w-full mx-auto p-3 sm:p-5 flex flex-col gap-3">
+<!-- BEGIN: ChatHeaderStatus -->
+<!-- แถบแจ้งสถานะห้องแชทด้านบน -->
+<section class="bg-white rounded-xl shadow-xs border border-slate-200 p-3 sm:px-5 flex flex-col md:flex-row md:items-center justify-between gap-3" data-purpose="chat-header-bar">
+<!-- Room ID & Status Info -->
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-600">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-2">
+<h2 class="text-base font-bold text-slate-800 font-heading">ห้องที่ #003</h2>
+<span class="text-sm font-semibold text-teal-700 font-heading">คิวที่ 2</span>
+<span class="bg-sky-50 text-sky-600 border border-sky-200 text-[11px] px-2 py-0.5 rounded-full font-medium">รอตอบกลับ</span>
+</div>
+<p class="text-xs text-slate-400 mt-0.5">(ปิดเคสอัตโนมัติ: -)</p>
+</div>
+</div>
+<!-- Action Status Badges / Buttons -->
+<div class="flex items-center gap-2 sm:gap-3 flex-wrap">
+<div class="flex items-center bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-medium gap-1.5 shadow-2xs">
+<svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span>เภสัชกรออกใบสั่งยาให้แล้ว</span>
+</div>
+<button class="inline-flex items-center bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white px-3.5 py-1.5 rounded-lg text-xs font-medium transition shadow-xs gap-1.5" type="button">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span>ดูใบสั่งยาและสั่งซื้อ</span>
+</button>
+</div>
+</section>
+<!-- END: ChatHeaderStatus -->
+<!-- BEGIN: TwoColumnWorkspace -->
+<div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 items-start min-h-[580px]">
+<!-- BEGIN: LeftColumnChatArea -->
+<!-- ฝั่งซ้าย: หน้าต่างแชทสนทนาระหว่างคนไข้และเภสัชกร -->
+<section class="lg:col-span-8 bg-white rounded-xl shadow-xs border border-slate-200 flex flex-col h-[650px] overflow-hidden" data-purpose="chat-box-container">
+<!-- Conversation Thread -->
+<div class="flex-1 p-4 sm:p-5 overflow-y-auto space-y-4 custom-scrollbar bg-slate-50/50" data-purpose="messages-stream" id="chat-messages-scroll">
+<!-- System Time Stamp Indicator -->
+<div class="text-center my-2">
+<span class="text-[11px] bg-slate-200 text-slate-500 px-2.5 py-1 rounded-full font-medium">วันนี้ 10:20 น.</span>
+</div>
+<!-- 1. Patient Message (Right side, Blue bubble) -->
+<div class="flex flex-col items-end">
+<span class="text-[11px] font-medium text-slate-400 mb-1 mr-1">คนไข้</span>
+<div class="max-w-[85%] sm:max-w-[70%] bg-sky-500 text-white rounded-2xl rounded-tr-xs px-4 py-2.5 text-sm shadow-xs leading-relaxed">
+              สวัสดีค่ะ มีอาการปวดท้องประจำเดือนมาก ควรทานยาอะไรดีคะ
+            </div>
+<span class="text-[10px] text-slate-400 mt-1 mr-1">10:24</span>
+</div>
+<!-- 2. Pharmacist Message (Left side, White card with avatar) -->
+<div class="flex items-start gap-2.5 max-w-[90%] sm:max-w-[75%]">
+<!-- Pharmacist Avatar Icon -->
+<div class="w-8 h-8 rounded-full bg-teal-600 text-white flex-shrink-0 flex items-center justify-center shadow-xs mt-1">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<div class="flex flex-col">
+<div class="flex items-baseline gap-2 mb-1">
+<span class="text-xs font-semibold text-slate-700 font-heading">เภสัชกร</span>
+<span class="text-[10px] text-slate-400">10:24</span>
+</div>
+<div class="bg-white border border-slate-200 text-slate-800 rounded-2xl rounded-tl-xs px-4 py-2.5 text-sm shadow-2xs leading-relaxed">
+                สวัสดีค่ะ แนะนำพาราเซตามอล 500 mg รับประทานครั้งละ 1 เม็ด ทุก 6-8 ชั่วโมงค่ะ
+              </div>
+</div>
+</div>
+<!-- 3. Patient Message 2 (Right side) -->
+<div class="flex flex-col items-end">
+<span class="text-[11px] font-medium text-slate-400 mb-1 mr-1">คนไข้</span>
+<div class="max-w-[85%] sm:max-w-[70%] bg-sky-500 text-white rounded-2xl rounded-tr-xs px-4 py-2.5 text-sm shadow-xs leading-relaxed">
+              ขอบคุณมากค่ะ แล้วยาไอบูโพรเฟนทานได้ไหมคะ
+            </div>
+<span class="text-[10px] text-slate-400 mt-1 mr-1">10:30</span>
+</div>
+</div>
+<!-- Chat Input Footer -->
+<div class="p-3 sm:p-4 bg-white border-t border-slate-200" data-purpose="chat-input-bar">
+<form class="flex items-center gap-2" onsubmit="event.preventDefault();">
+<!-- Attachment Icon Button -->
+<button class="p-2 text-slate-400 hover:text-teal-600 transition rounded-lg hover:bg-slate-100" title="แนบไฟล์หรือรูปภาพ" type="button">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+<!-- Text Input Field -->
+<input class="flex-1 bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 placeholder-slate-400 transition" placeholder="พิมพ์ข้อความ..." type="text">
+<!-- Send Message Button -->
+<button class="inline-flex items-center justify-center bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition shadow-xs gap-1.5 flex-shrink-0" type="submit">
+<svg class="w-4 h-4 transform rotate-45" fill="currentColor" viewBox="0 0 24 24">
+<path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+</svg>
+<span>ส่ง</span>
+</button>
+</form>
+</div>
+</section>
+<!-- END: LeftColumnChatArea -->
+<!-- BEGIN: RightColumnPrescriptionArea -->
+<!-- ฝั่งขวา: แบบฟอร์มออกใบสั่งยา และประวัติใบสั่งยาที่ออกแล้ว -->
+<section class="lg:col-span-4 flex flex-col gap-4" data-purpose="prescription-management-panel">
+<!-- 1. Form Card: ใบสั่งยา -->
+<div class="bg-white rounded-xl shadow-xs border border-slate-200 p-4 sm:p-5" data-purpose="create-prescription-card">
+<div class="flex items-center gap-2 mb-4 pb-2 border-b border-slate-100">
+<svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<h3 class="text-base font-bold text-slate-800 font-heading">ใบสั่งยา</h3>
+</div>
+<!-- Form inputs -->
+<form class="space-y-3" onsubmit="event.preventDefault();">
+<!-- Medication Selection Dropdown -->
+<div>
+<label class="block text-xs font-medium text-slate-600 mb-1">เลือกยา</label>
+<div class="relative">
+<select class="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:ring-teal-500 focus:border-teal-500 appearance-none pr-8">
+<option selected="">เลือกยา (เหลือ 50)</option>
+<option>พาราเซตามอล 500 mg (คงเหลือ 150)</option>
+<option>ไอบูโพรเฟน 400 mg (คงเหลือ 80)</option>
+<option>อะม็อกซีซิลลิน 500 mg (หมดอายุ 0)</option>
+</select>
+<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+</div>
+</div>
+<!-- Dosage specification -->
+<div>
+<label class="block text-xs font-medium text-slate-600 mb-1">ขนาดยา</label>
+<input class="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:ring-teal-500 focus:border-teal-500" placeholder="ขนาดยา เช่น 500 mg" type="text" value="500 mg">
+</div>
+<!-- Usage instructions -->
+<div>
+<label class="block text-xs font-medium text-slate-600 mb-1">วิธีใช้</label>
+<textarea class="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:ring-teal-500 focus:border-teal-500 resize-none" placeholder="ระบุวิธีใช้ เช่น รับประทานครั้งละ 1 เม็ด ทุก 6-8 ชม." rows="2">รับประทานครั้งละ 1 เม็ด ทุก 6-8 ชั่วโมง เมื่อมีอาการ</textarea>
+</div>
+<!-- Quantity Input -->
+<div>
+<label class="block text-xs font-medium text-slate-600 mb-1">จำนวน</label>
+<input class="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:ring-teal-500 focus:border-teal-500" placeholder="ระบุจำนวน เช่น 10" type="number" value="10">
+</div>
+<!-- Submit Button (Green CTA) -->
+<button class="w-full mt-2 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white font-medium text-sm py-2.5 px-4 rounded-lg transition shadow-xs flex items-center justify-center gap-1.5" type="submit">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span>ออกใบสั่งยา</span>
+</button>
+</form>
+</div>
+<!-- 2. Issued Prescription Card: ใบสั่งยาออกแล้ว -->
+<div class="bg-white rounded-xl shadow-xs border border-slate-200 p-4 sm:p-5" data-purpose="issued-prescriptions-summary">
+<div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+<div class="flex items-center gap-1.5">
+<svg class="w-4 h-4 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+<path clip-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" fill-rule="evenodd"></path>
+</svg>
+<h4 class="text-sm font-bold text-slate-800 font-heading">ใบสั่งยาออกแล้ว</h4>
+</div>
+<span class="text-xs font-semibold text-teal-700 bg-teal-50 border border-teal-100 px-2 py-0.5 rounded">เลขที่ 00123</span>
+</div>
+<!-- Items Table / List -->
+<div class="overflow-x-auto">
+<table class="w-full text-xs text-left">
+<thead>
+<tr class="text-slate-400 border-b border-slate-100">
+<th class="py-1.5 font-medium">ยา</th>
+<th class="py-1.5 font-medium text-center">ขนาดยา</th>
+<th class="py-1.5 font-medium text-right">จำนวน</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-100 text-slate-700">
+<tr>
+<td class="py-2.5 font-medium text-slate-900">พาราเซตามอล</td>
+<td class="py-2.5 text-center text-slate-500">500 mg</td>
+<td class="py-2.5 text-right font-semibold text-slate-800">10 เม็ด</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Prescription Footer Details -->
+<div class="mt-3 pt-2.5 border-t border-slate-100 text-[11px] text-slate-400 flex justify-between items-center">
+<span>ออกเมื่อ: 20 ต.ค. 2568 10:28</span>
+<span class="text-emerald-600 font-medium">พร้อมชำระเงิน</span>
+</div>
+</div>
+</section>
+<!-- END: RightColumnPrescriptionArea -->
+</div>
+<!-- END: TwoColumnWorkspace -->
+</main>
+<!-- END: MainContentArea -->
+<!-- BEGIN: InteractiveScripts -->
+<script data-purpose="chat-autoscroll">
+    // Automatically keep chat scrolled to the bottom
+    document.addEventListener('DOMContentLoaded', () => {
+      const chatContainer = document.getElementById('chat-messages-scroll');
+      if (chatContainer) {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+    });
+  </script>
+<!-- END: InteractiveScripts -->
+</body></html>

@@ -1,0 +1,234 @@
+<!DOCTYPE html><html lang="th" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Pharmacy Online - เลือกบทบาท</title>
+<!-- External Tailwind CSS v3 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Prompt for Modern Thai Medical UI -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Prompt:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&amp;display=swap" rel="stylesheet">
+<!-- Tailwind Configuration -->
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Prompt', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              500: '#10b981',
+              600: '#00A884',
+              700: '#0d9488',
+              800: '#0f766e',
+            },
+            rolePatient: {
+              teal: '#00A884',
+              hover: '#008f70',
+            },
+            rolePharmacist: {
+              blue: '#1E88E5',
+              hover: '#1976D2',
+            }
+          }
+        }
+      }
+    }
+  </script>
+<!-- BEGIN: Custom Styles for Layout & Visual Enhancements -->
+<style data-purpose="base-typography">
+    body {
+      font-family: 'Prompt', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+  </style>
+<style data-purpose="component-effects">
+    /* Subtle custom card elevation and transition */
+    .role-card {
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .role-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.08), 0 6px 12px -4px rgba(0, 0, 0, 0.04);
+    }
+  </style>
+<!-- END: Custom Styles -->
+</head>
+<body class="bg-[#F0F7F7] min-h-screen flex flex-col text-slate-800 antialiased selection:bg-brand-100 selection:text-brand-800">
+<!-- BEGIN: Header -->
+<header class="bg-white border-b border-slate-200/90 shadow-sm sticky top-0 z-30" data-purpose="top-navigation">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+<!-- Brand Logo & System Name -->
+<a aria-label="หน้าหลัก Pharmacy Online" class="flex items-center gap-2.5 group focus:outline-none" href="index.html">
+<div class="w-9 h-9 rounded-lg bg-[#00A884] flex items-center justify-center text-white shadow-sm transition-transform group-hover:scale-105">
+<!-- Cross Pill Icon -->
+<svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+<path d="M4.5 10.5C3.67 10.5 3 11.17 3 12s.67 1.5 1.5 1.5h4.5V18c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-4.5H16.5c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5H12V6c0-.83-.67-1.5-1.5-1.5S9 5.17 9 6v4.5H4.5z"></path>
+<path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V5h14v14z" opacity="0.3"></path>
+</svg>
+</div>
+<span class="text-xl font-bold tracking-tight text-[#00A884]">
+          Pharmacy <span class="text-slate-700">Online</span>
+</span>
+</a>
+<!-- Right Header Actions -->
+<div class="flex items-center gap-3">
+<!-- User Avatar Circle -->
+<div class="w-8 h-8 rounded-full bg-slate-100 border border-slate-300 flex items-center justify-center text-slate-500 hover:text-slate-700" title="โปรไฟล์ผู้ใช้">
+<svg class="w-4 h-4 fill-current" viewBox="0 0 24 24">
+<path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path>
+</svg>
+</div>
+<!-- Role Badge Button -->
+<a class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-medium text-white bg-[#00A884] hover:bg-[#009272] rounded-md transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-[#00A884]/40" data-purpose="role-switch-badge" href="index.html">
+<span class="">เปลี่ยนบทบาท</span>
+</a>
+</div>
+</div>
+</header>
+<!-- END: Header -->
+<!-- BEGIN: MainContent -->
+<main class="flex-1 flex flex-col justify-center items-center px-4 sm:px-6 py-10 lg:py-16" data-purpose="role-selection-view">
+<div class="w-full max-w-4xl mx-auto">
+<!-- Section: Brand Center Heading -->
+<!-- Center Title Banner with Pill/Cross Icon -->
+<div class="text-center mb-10 sm:mb-12" data-purpose="hero-title">
+<div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-teal-50 border border-teal-100 text-[#00A884] mb-3 shadow-inner">
+<svg class="w-9 h-9" fill="currentColor" viewBox="0 0 24 24">
+<path d="M10.5 4a1.5 1.5 0 0 0-3 0v4.5H3a1.5 1.5 0 0 0 0 3h4.5V16a1.5 1.5 0 0 0 3 0v-4.5H15a1.5 1.5 0 0 0 0-3h-4.5V4z"></path>
+<path d="M19.5 8a1.5 1.5 0 0 0-1.5 1.5V11h-1.5a1.5 1.5 0 0 0 0 3H18v1.5a1.5 1.5 0 0 0 3 0V14h1.5a1.5 1.5 0 0 0 0-3H21V9.5A1.5 1.5 0 0 0 19.5 8z" opacity="0.6"></path>
+</svg>
+</div>
+<h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-800 tracking-tight">
+          Pharmacy Online
+        </h1>
+<p class="mt-2 text-sm sm:text-base text-slate-500 font-medium">
+          ปรึกษาเภสัชกร สะดวก ปลอดภัย ใกล้คุณ
+        </p>
+</div>
+<!-- Section: Dual Role Selection Cards -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 items-stretch mb-8" data-purpose="role-cards-container">
+<!-- CARD 1: Patient (คนไข้) -->
+<section aria-labelledby="role-patient-title" class="role-card bg-white rounded-2xl p-6 sm:p-8 border border-slate-200/80 shadow-md shadow-slate-100 flex flex-col items-center text-center">
+<!-- Role Icon -->
+<div class="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-teal-50 border-2 border-teal-200/70 flex items-center justify-center text-[#00A884] mb-4">
+<!-- Patient / User Profile Avatar -->
+<svg class="w-12 h-12" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+<path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<!-- Role Label -->
+<span class="text-xs sm:text-sm font-normal text-slate-500">เข้าใช้งานเป็น</span>
+<h2 class="text-xl sm:text-2xl font-bold text-slate-800 mt-0.5 mb-6" id="role-patient-title">คนไข้</h2>
+<!-- Role Selector Form -->
+<form class="w-full flex-1 flex flex-col justify-between space-y-4" onsubmit="event.preventDefault(); window.location.href='#';">
+<div class="w-full text-left">
+<label class="sr-only" for="select-patient">เลือกชื่อผู้ป่วย</label>
+<div class="relative">
+<select class="w-full appearance-none bg-slate-50 border border-slate-300 text-slate-700 text-sm sm:text-base rounded-xl py-3 px-4 pr-10 focus:outline-none focus:ring-2 focus:ring-[#00A884] focus:border-[#00A884] transition-all cursor-pointer" id="select-patient">
+<option disabled="" selected="" value="">เลือกชื่อผู้ป่วย</option>
+<option value="p1">นางสาวสมพร แจ่มใส</option>
+<option value="p2">นายทวีป อรุณรุ่ง</option>
+<option value="p3">นางวารุณี หวานชื่น</option>
+<option value="p4">นายพีรวัฒน์</option>
+</select>
+<!-- Custom Down Arrow -->
+<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-slate-400">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+<path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+</div>
+</div>
+<!-- Submit Button (Patient) -->
+<button class="w-full py-3.5 px-6 rounded-xl bg-[#00A884] hover:bg-[#008f70] active:scale-[0.99] text-white font-medium text-base shadow-md shadow-teal-500/20 transition-all focus:outline-none focus:ring-2 focus:ring-[#00A884]/40" data-purpose="enter-patient-btn" type="submit">
+              เข้าใช้งานเป็นคนไข้
+            </button>
+</form>
+</section>
+<!-- CARD 2: Pharmacist (เภสัชกร) -->
+<section aria-labelledby="role-pharmacist-title" class="role-card bg-white rounded-2xl p-6 sm:p-8 border border-slate-200/80 shadow-md shadow-slate-100 flex flex-col items-center text-center">
+<!-- Role Icon -->
+<div class="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-blue-50 border-2 border-blue-200/70 flex items-center justify-center text-blue-600 mb-4">
+<!-- Doctor / Pharmacist Avatar with Stethoscope & Lab Coat Representation -->
+<svg class="w-12 h-12" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+<path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" stroke-linecap="round" stroke-linejoin="round"></path>
+<path d="M4.5 20.118a7.5 7.5 0 0115 0" stroke-linecap="round" stroke-linejoin="round"></path>
+<path d="M9 14.25v2.25a3 3 0 006 0v-2.25" stroke-linecap="round" stroke-linejoin="round"></path>
+<circle cx="15" cy="16.5" fill="currentColor" r="1.2"></circle>
+</svg>
+</div>
+<!-- Role Label -->
+<span class="text-xs sm:text-sm font-normal text-slate-500">เข้าใช้งานเป็น</span>
+<h2 class="text-xl sm:text-2xl font-bold text-slate-800 mt-0.5 mb-6" id="role-pharmacist-title">เภสัชกร</h2>
+<!-- Role Selector Form -->
+<form class="w-full flex-1 flex flex-col justify-between space-y-4" onsubmit="event.preventDefault(); window.location.href='#';">
+<div class="w-full text-left">
+<label class="sr-only" for="select-pharmacist">เลือกชื่อเภสัชกร</label>
+<div class="relative">
+<select class="w-full appearance-none bg-slate-50 border border-slate-300 text-slate-700 text-sm sm:text-base rounded-xl py-3 px-4 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all cursor-pointer" id="select-pharmacist">
+<option disabled="" selected="" value="">เลือกชื่อเภสัชกร</option>
+<option value="rx1">ภญ. สมฤดี มั่นคง</option>
+<option value="rx2">ภก. ธนพัฒน์ วงศ์สว่าง</option>
+<option value="rx3">ภญ. สุพรรณิการ์ สิทธิพร</option>
+</select>
+<!-- Custom Down Arrow -->
+<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-slate-400">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+<path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+</div>
+</div>
+<!-- Submit Button (Pharmacist) -->
+<button class="w-full py-3.5 px-6 rounded-xl bg-[#1E88E5] hover:bg-[#1976D2] active:scale-[0.99] text-white font-medium text-base shadow-md shadow-blue-500/20 transition-all focus:outline-none focus:ring-2 focus:ring-blue-400/40" data-purpose="enter-pharmacist-btn" type="submit">
+              เข้าใช้งานเป็นเภสัชกร
+            </button>
+</form>
+</section>
+</div>
+<!-- Section: Instruction / Hint Notice Bar -->
+
+</div>
+</main>
+<!-- END: MainContent -->
+<!-- BEGIN: Footer -->
+<footer class="py-4 text-center text-xs text-slate-400 border-t border-slate-200/60 bg-white" data-purpose="simple-footer">
+<p class="">© 2026 Pharmacy Online. ระบบการให้บริการเภสัชกรรมทางไกล</p>
+</footer>
+<!-- END: Footer -->
+<!-- BEGIN: Interaction Handling Script -->
+<script data-purpose="role-redirect-handler">
+    document.addEventListener('DOMContentLoaded', function () {
+      // Small client-side handler example for smooth navigation feedback
+      const patientSelect = document.getElementById('select-patient');
+      const pharmacistSelect = document.getElementById('select-pharmacist');
+
+      // Focus feedback or auto-validation if needed in mock
+      const patientForm = patientSelect?.closest('form');
+      patientForm?.addEventListener('submit', function (e) {
+        if (!patientSelect.value) {
+          e.preventDefault();
+          alert('กรุณาเลือกชื่อผู้ป่วยก่อนเข้าใช้งาน');
+          patientSelect.focus();
+        }
+      });
+
+      const pharmacistForm = pharmacistSelect?.closest('form');
+      pharmacistForm?.addEventListener('submit', function (e) {
+        if (!pharmacistSelect.value) {
+          e.preventDefault();
+          alert('กรุณาเลือกชื่อเภสัชกรก่อนเข้าใช้งาน');
+          pharmacistSelect.focus();
+        }
+      });
+    });
+  </script>
+<!-- END: Interaction Handling Script -->
+
+
+</body></html>

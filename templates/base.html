@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ร้านขายยาออนไลน์{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">
+  <style>
+    body { background: #f5f7fa; }
+    .chat-box { height: 380px; overflow-y: auto; background: #fff; }
+    .msg { max-width: 75%; padding: .4rem .75rem; border-radius: 1rem; margin-bottom: .4rem; white-space: pre-wrap; word-break: break-word; }
+    .msg.mine { background: #0d6efd; color: #fff; margin-left: auto; }
+    .msg.theirs { background: #e9ecef; }
+    .msg small { display: block; opacity: .7; font-size: .7rem; }
+    .qr-mock { width: 150px; height: 150px; background: repeating-conic-gradient(#000 0 25%, #fff 0 50%) 0 0 / 15px 15px; border: 8px solid #fff; outline: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-dark {% if pharmacist is defined %}bg-success{% elif patient is defined %}bg-primary{% else %}bg-dark{% endif %} mb-4">
+  <div class="container">
+    <span class="navbar-brand mb-0 h1">
+      {% if pharmacist is defined %}เภสัชกร: {{ pharmacist.full_name }} · {{ pharmacist.pharmacy_name }}
+      {% elif patient is defined %}คนไข้: {{ patient.full_name }}
+      {% else %}ร้านขายยาออนไลน์{% endif %}
+    </span>
+    <div class="d-flex gap-2">
+      {% if pharmacist is defined %}
+        <a class="btn btn-sm btn-light" href="{{ url_for('pharmacist_home', phid=pharmacist.pharmacist_id) }}">คิวและห้องแชท</a>
+        <a class="btn btn-sm btn-light" href="{{ url_for('pharmacist_stock', phid=pharmacist.pharmacist_id) }}">สต็อกยา</a>
+      {% elif patient is defined %}
+        <a class="btn btn-sm btn-light" href="{{ url_for('patient_home', pid=patient.patient_id) }}">หน้าหลัก</a>
+        <a class="btn btn-sm btn-light" href="{{ url_for('patient_orders', pid=patient.patient_id) }}">ประวัติคำสั่งซื้อ</a>
+      {% endif %}
+      <a class="btn btn-sm btn-outline-light" href="{{ url_for('index') }}">เปลี่ยนบทบาท</a>
+    </div>
+  </div>
+</nav>
+<main class="container pb-5">
+  {% if error %}
+    <div class="alert alert-danger fs-5" role="alert"><strong>ระบบปฏิเสธรายการ:</strong> {{ error }}</div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

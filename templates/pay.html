@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between">
+        <span>4. ชำระเงิน · คำสั่งซื้อเลขที่ {{ order.order_id }}</span>
+        <span class="badge bg-warning text-dark">{{ order.status|th }}</span>
+      </div>
+      <div class="card-body">
+        <table class="table">
+          <thead><tr><th>#</th><th>ยา</th><th class="text-end">จำนวน</th><th class="text-end">ราคา/หน่วย</th><th class="text-end">รวม (บาท)</th></tr></thead>
+          <tbody>
+            {% for l in order.lines %}
+            <tr><td>{{ l.line_no }}</td><td>{{ l.drug_name }}</td><td class="text-end">{{ l.quantity }}</td>
+                <td class="text-end">{{ l.unit_price|baht }}</td><td class="text-end">{{ l.line_total|baht }}</td></tr>
+            {% endfor %}
+          </tbody>
+          <tfoot><tr><th colspan="4" class="text-end">ยอดที่ต้องชำระ</th><th class="text-end fs-5">{{ order.total|baht }}</th></tr></tfoot>
+        </table>
+        <p class="mb-0 text-muted">จัดส่งที่: {{ order.shipping_address }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card mb-3">
+      <div class="card-header">ชำระด้วย QR Code (จำลอง)</div>
+      <form class="card-body text-center" method="post">
+        <input type="hidden" name="method" value="qr_code">
+        <div class="qr-mock mx-auto mb-3"></div>
+        <button class="btn btn-primary">จำลองการสแกนจ่าย {{ order.total|baht }} บาท</button>
+      </form>
+    </div>
+    <div class="card">
+      <div class="card-header">โอนเงินผ่านธนาคาร (จำลอง)</div>
+      <form class="card-body" method="post">
+        <input type="hidden" name="method" value="bank_transfer">
+        <select class="form-select mb-3" name="bank_name">
+          <option>ธนาคารตัวอย่าง ก</option>
+          <option>ธนาคารตัวอย่าง ข</option>
+        </select>
+        <button class="btn btn-outline-primary">จำลองการโอนเงินและแนบสลิป</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

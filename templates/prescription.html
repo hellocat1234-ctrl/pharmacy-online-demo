@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <div class="card-header d-flex justify-content-between">
+    <span>3. ใบสั่งยาเลขที่ {{ rx.prescription_id }}</span>
+    <span>{{ rx.prescribed_date }} {{ rx.prescribed_time }} น.</span>
+  </div>
+  <div class="card-body">
+    <p class="mb-3">{{ rx.pharmacy_name }} · ผู้สั่งยา: ภก. {{ rx.pharmacist_name }}</p>
+    <table class="table">
+      <thead><tr><th>#</th><th>ยา</th><th>ขนาดยา</th><th>วิธีใช้</th><th class="text-end">จำนวน</th><th class="text-end">ราคา/หน่วย</th><th class="text-end">รวม (บาท)</th></tr></thead>
+      <tbody>
+        {% for l in rx.lines %}
+        <tr><td>{{ l.line_no }}</td><td>{{ l.drug_name }}</td><td>{{ l.dosage }}</td><td>{{ l.usage_note }}</td>
+            <td class="text-end">{{ l.quantity }}</td><td class="text-end">{{ l.price|baht }}</td><td class="text-end">{{ l.line_total|baht }}</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot><tr><th colspan="6" class="text-end">ยอดรวม</th><th class="text-end">{{ rx.total|baht }}</th></tr></tfoot>
+    </table>
+
+    {% if rx.order_id %}
+      <div class="alert alert-secondary mb-0">
+        สั่งซื้อแล้ว (คำสั่งซื้อเลขที่ {{ rx.order_id }} · {{ rx.order_status|th }})
+        {% if rx.order_status == 'pending_payment' %}
+          <a class="btn btn-primary ms-2" href="{{ url_for('patient_pay', pid=patient.patient_id, order_id=rx.order_id) }}">ไปชำระเงิน</a>
+        {% else %}
+          <a class="btn btn-outline-primary ms-2" href="{{ url_for('patient_receipt', pid=patient.patient_id, order_id=rx.order_id) }}">ดูใบเสร็จ</a>
+        {% endif %}
+      </div>
+    {% else %}
+      <form method="post" action="{{ url_for('patient_place_order', pid=patient.patient_id, rx_id=rx.prescription_id) }}">
+        <label class="form-label" for="shipping_address">ที่อยู่จัดส่ง</label>
+        <textarea class="form-control mb-3" id="shipping_address" name="shipping_address" rows="2" maxlength="500" required>{{ shipping_address }}</textarea>
+        <button class="btn btn-primary btn-lg">สั่งซื้อ</button>
+      </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

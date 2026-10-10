@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row g-4">
+  <div class="{{ 'col-lg-5' if role == 'pharmacist' else 'col-lg-8 mx-auto' }}">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>2. ห้องแชท {{ chat.chat_id }} · คิวที่ {{ chat.queue_no }} ·
+          {% if role == 'patient' %}ภก. {{ chat.pharmacist_name }}{% else %}{{ chat.patient_name }}{% endif %}</span>
+        <span id="chat-status" class="badge bg-secondary"></span>
+      </div>
+      {% if role == 'pharmacist' %}
+      <div id="reply-timer" class="alert alert-warning rounded-0 mb-0 py-2 d-none">
+        ต้องตอบคนไข้ภายใน <strong id="reply-countdown" class="fs-5"></strong> ไม่เช่นนั้นจะเป็น “ให้คำปรึกษาไม่สำเร็จ”
+      </div>
+      {% endif %}
+      <div id="chat-box" class="chat-box card-body d-flex flex-column"></div>
+      <div class="card-footer">
+        <form id="chat-form" class="input-group">
+          <input id="chat-input" class="form-control" maxlength="1000" autocomplete="off" placeholder="พิมพ์ข้อความ..." autofocus>
+          <button class="btn btn-primary">ส่ง</button>
+        </form>
+        <div id="chat-closed" class="text-muted d-none"></div>
+      </div>
+    </div>
+    {% if role == 'patient' %}
+    <div id="rx-banner" class="alert alert-success mt-3 d-none">
+      เภสัชกรออกใบสั่งยาให้แล้ว
+      <a id="rx-link" class="btn btn-success ms-2" href="#">ดูใบสั่งยาและสั่งซื้อ</a>
+    </div>
+    {% else %}
+    <form id="close-form" class="mt-3 {{ 'd-none' if chat.status != 'open' }}" method="post"
+          action="{{ url_for('pharmacist_close_chat', phid=pharmacist.pharmacist_id, chat_id=chat.chat_id) }}">
+      <button class="btn btn-outline-danger">ปิดห้องแชท</button>
+      <span class="text-muted small ms-2">ออกใบสั่งยาให้เสร็จก่อนปิด ปิดแล้วจะส่งข้อความและออกใบสั่งยาไม่ได้</span>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if role == 'pharmacist' %}
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header">ใบสั่งยา</div>
+      <div class="card-body">
+        {% if chat.prescription_id %}
+          <p class="text-success">ออกใบสั่งยาเลขที่ {{ chat.prescription_id }} แล้ว</p>
+          <table class="table table-sm">
+            <thead><tr><th>#</th><th>ยา</th><th>ขนาดยา</th><th>วิธีใช้</th><th class="text-end">จำนวน</th></tr></thead>
+            <tbody>
+              {% for l in rx_lines %}
+              <tr><td>{{ l.line_no }}</td><td>{{ l.drug_name }}</td><td>{{ l.dosage }}</td><td>{{ l.usage_note }}</td><td class="text-end">{{ l.quantity }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% elif chat.status != 'open' %}
+          <p class="text-muted mb-0">ห้องแชทนี้ปิดแล้วโดยไม่มีใบสั่งยา</p>
+        {% else %}
+          <form method="post" action="{{ url_for('pharmacist_prescribe', phid=pharmacist.pharmacist_id, chat_id=chat.chat_id) }}">
+            <table class="table table-sm align-middle">
+              <thead><tr><th style="width:34%">ยา (คงเหลือ)</th><th>ขนาดยา</th><th>วิธีใช้</th><th style="width:14%">จำนวน</th></tr></thead>
+              <tbody>
+                {% for row in form_rows[:3] %}
+                <tr>
+                  <td>
+                    <select class="form-select form-select-sm" name="drug_id">
+                      <option value="">- ไม่เลือก -</option>
+                      {% for g in drugs %}
+                      <option value="{{ g.drug_id }}" {% if g.stock == 0 %}disabled{% elif row.drug_id == g.drug_id|string %}selected{% endif %}>{{ g.name }} ({{ 'หมด' if g.stock == 0 else 'เหลือ %s'|format(g.stock) }})</option>
+                      {% endfor %}
+                    </select>
+                    <input type="hidden" name="strength" value="">
+                  </td>
+                  <td><input class="form-control form-control-sm" name="dosage" maxlength="100" placeholder="ครั้งละ 1 เม็ด" value="{{ row.dosage or '' }}"></td>
+                  <td><input class="form-control form-control-sm" name="usage_note" maxlength="255" placeholder="ทุก 6 ชม. เมื่อมีอาการ" value="{{ row.usage_note or '' }}"></td>
+                  <td><input class="form-control form-control-sm" name="quantity" type="number" min="1" placeholder="0" value="{{ row.quantity or '' }}"></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <button class="btn btn-success">ออกใบสั่งยา</button>
+            <span class="text-muted ms-2 small">แถวที่ไม่เลือกยาจะไม่ถูกบันทึก ห้องแชทยังเปิดอยู่หลังออกใบสั่งยา</span>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='poll.js') }}"></script>
+<script src="{{ url_for('static', filename='chat.js') }}"></script>
+<script>
+  startChat({
+    role: "{{ role }}",
+    messagesUrl: "{{ url_for('api_messages', chat_id=chat.chat_id) }}",
+    {% if role == 'patient' %}
+    prescriptionUrl: "{{ url_for('patient_prescription', pid=patient.patient_id, rx_id=0) }}".replace(/0$/, ""),
+    {% endif %}
+    hasPrescription: {{ 'true' if chat.prescription_id else 'false' }}
+  });
+</script>
+{% endblock %}

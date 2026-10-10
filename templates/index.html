@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-4">เลือกบทบาท (บัญชีทดสอบ)</h3>
+<div class="row g-4">
+  <div class="col-md-6">
+    <div class="card border-primary h-100">
+      <div class="card-header bg-primary text-white">คนไข้</div>
+      <form class="card-body" method="get" action="{{ url_for('enter') }}">
+        <input type="hidden" name="role" value="patient">
+        <select class="form-select mb-3" name="id">
+          {% for p in patients %}<option value="{{ p.patient_id }}">{{ p.full_name }}{{ " (VIP)" if p.is_vip }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-primary">เข้าใช้งานเป็นคนไข้</button>
+      </form>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card border-success h-100">
+      <div class="card-header bg-success text-white">เภสัชกร</div>
+      <form class="card-body" method="get" action="{{ url_for('enter') }}">
+        <input type="hidden" name="role" value="pharmacist">
+        <select class="form-select mb-3" name="id">
+          {% for f in pharmacists %}<option value="{{ f.pharmacist_id }}">{{ f.full_name }} ({{ f.pharmacy_name }})</option>{% endfor %}
+        </select>
+        <button class="btn btn-success">เข้าใช้งานเป็นเภสัชกร</button>
+      </form>
+    </div>
+  </div>
+</div>
+<p class="text-muted mt-4">เปิดหลายหน้าต่างได้: คนไข้ 1 หน้าต่าง และเภสัชกรคนละหน้าต่าง</p>
+{% endblock %}
