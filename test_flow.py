@@ -1,4 +1,4 @@
-"""ทดสอบ 1 รอบเต็ม + กรณีปฏิเสธ + คิวรอ/VIP + ตัวนับเวลาตอบกลับ ผ่าน route ของ Flask กับฐานข้อมูล Oracle จริง
+"""ทดสอบ 1 รอบเต็ม + กรณีปฏิเสธตอนสั่งซื้อ (ROLLBACK) + คิวรอ/VIP + ตัวนับเวลาตอบกลับ ผ่าน route ของ Flask กับฐานข้อมูล Oracle จริง
 
 รัน reset.bat ก่อน แล้วสั่ง:  python test_flow.py
 (สคริปต์นี้สร้างข้อมูลทดสอบจริงในฐานข้อมูล ต้องรัน reset.bat อีกครั้งก่อน Demo)
@@ -31,9 +31,8 @@ def stock(batch_id):
 
 
 def snapshot():
-    """จำนวนแถวของตารางธุรกรรม + สต็อกทุกล็อต ใช้เทียบก่อน/หลังกรณีปฏิเสธ"""
-    tables = ["prescription", "prescription_detail", "orders", "order_detail", "payment", "qr_code",
-              "transfer_slip", "receipt", "receipt_detail"]
+    """จำนวนแถวของทุกตารางใน schema + สต็อกทุกล็อต ใช้เทียบก่อน/หลังกรณีปฏิเสธ"""
+    tables = [r["table_name"] for r in db.query("SELECT table_name FROM user_tables ORDER BY table_name")]
     counts = {t: scalar(f"SELECT COUNT(*) FROM {t}") for t in tables}
     counts["stock"] = [(r["batch_id"], r["quantity"]) for r in
                        db.query("SELECT batch_id, quantity FROM drug_batch ORDER BY batch_id")]
@@ -83,11 +82,11 @@ def rx_form(lines):
     return form
 
 
-def prescribe(phid, chat_id, lines):
+def prescribe(phid, chat_id, lines, label="ออกใบสั่งยาขณะห้องยังเปิด"):
     r = client.post(f"/pharmacist/{phid}/chat/{chat_id}/prescription", data=rx_form(lines))
     rx_id = scalar("SELECT MAX(prescription_id) FROM prescription WHERE chat_id = :c", c=chat_id)
     n = scalar("SELECT COUNT(*) FROM prescription_detail WHERE prescription_id = :r", r=rx_id)
-    check("ออกใบสั่งยาขณะห้องยังเปิด", r.status_code == 302 and n == len(lines) and chat_state(chat_id) == "consulting",
+    check(label, r.status_code == 302 and n == len(lines) and chat_state(chat_id) == "consulting",
           f"rx_id={rx_id} lines={n}")
     return rx_id
 
@@ -100,15 +99,29 @@ def close(phid, chat_id):
     return client.post(f"/pharmacist/{phid}/chat/{chat_id}/close")
 
 
-def rejected_prescription(phid, chat_id, lines, message, label):
+def rejected_prescription(phid, chat_id, lines, message, label, form=None):
     before = snapshot()
-    r = client.post(f"/pharmacist/{phid}/chat/{chat_id}/prescription", data=rx_form(lines))
+    r = client.post(f"/pharmacist/{phid}/chat/{chat_id}/prescription", data=form or rx_form(lines))
     html = r.get_data(as_text=True)
     check(label, r.status_code == 200 and "ระบบปฏิเสธรายการ:" in html and message in html and snapshot() == before,
           "(ข้อความถูกต้อง, ไม่มีแถวใหม่ใน prescription/prescription_detail)")
 
 
-print("=== รอบที่ 1 : ฟังก์ชันหลักครบวงจร (คนไข้ 1) ===")
+def rejected_order(pid, rx_id, message, label):
+    """คนไข้กดสั่งซื้อแล้วถูกปฏิเสธ : ข้อความถูกต้อง และ ROLLBACK ทั้งใบ (จำนวนแถวทุกตาราง + สต็อกทุกล็อตเท่าเดิม)"""
+    before = snapshot()
+    r = client.post(f"/patient/{pid}/prescription/{rx_id}/order", data={"shipping_address": "7 หมู่ 2 ขอนแก่น 40150"})
+    html = r.get_data(as_text=True)
+    after = snapshot()
+    check(f"{label}: ระบบปฏิเสธ", r.status_code == 200 and "ระบบปฏิเสธรายการ:" in html
+          and f"{message} ระบบไม่สร้างคำสั่งซื้อและคืนสต็อกทั้งหมดแล้ว" in html, message)
+    check(f"{label}: ROLLBACK จำนวนแถวทุกตารางและสต็อกทุกล็อตเท่าเดิม", after == before, f"\n   ก่อน {before}\n   หลัง {after}")
+    check(f"{label}: ไม่มีคำสั่งซื้อของใบสั่งยานี้ และยังไม่บันทึกล็อตที่จ่าย",
+          scalar("SELECT COUNT(*) FROM orders WHERE prescription_id = :r", r=rx_id) == 0
+          and scalar("SELECT COUNT(batch_id) FROM prescription_detail WHERE prescription_id = :r", r=rx_id) == 0)
+
+
+print("=== รอบที่ 1 : ปฏิเสธตอนสั่งซื้อ (ROLLBACK) แล้วทำฟังก์ชันหลักครบวงจร (คนไข้ 1) ===")
 check("ก่อนทำ: ยา A = 20", stock(1) == 20, f"(จริง {stock(1)})")
 check("seed: เภสัชกร 2 คนร้านเดียวกัน, คนไข้ 4 คน, VIP 1 คน",
       scalar("SELECT COUNT(*) FROM pharmacist WHERE pharmacy_id = 1") == 2
@@ -128,17 +141,19 @@ check("dropdown: ยาที่คงเหลือ 0 เลือกไม่
       '<option value="6" disabled>คลอร์เฟนิรามีน 4 mg (หมด)</option>' in page
       and '<option value="1" >ยา A (พาราเซตามอล 500 mg) (เหลือ 20)</option>' in page)
 
-print("\n--- ด่านที่ 1 : ตรวจสต็อกตอนเภสัชกรออกใบสั่งยา ---")
+print("\n--- ฝั่งเภสัชกร : กันเฉพาะยาที่หมด และตรวจการกรอกฟอร์ม (ไม่เทียบจำนวนกับคงเหลือ) ---")
 rejected_prescription(1, chat_id, [(6, 1)], "คลอร์เฟนิรามีน 4 mg คงเหลือ 0 ออกใบสั่งยาไม่ได้", "ยาคงเหลือ 0 -> ปฏิเสธ")
-rejected_prescription(1, chat_id, [(1, 25)], "ยา A (พาราเซตามอล 500 mg) คงเหลือ 20 ออกใบสั่งยาได้ไม่เกินนี้", "สั่งเกินคงเหลือ -> ปฏิเสธ")
-rejected_prescription(1, chat_id, [(2, 10), (1, 25)], "ยา A (พาราเซตามอล 500 mg) คงเหลือ 20 ออกใบสั่งยาได้ไม่เกินนี้",
-                      "รายการแรกพอ รายการที่สองเกิน -> ปฏิเสธทั้งใบ")
-rejected_prescription(1, chat_id, [(1, 15), (1, 15)], "ยา A (พาราเซตามอล 500 mg) คงเหลือ 20 ออกใบสั่งยาได้ไม่เกินนี้",
-                      "ยาตัวเดียวกันสองแถวรวมกันเกิน -> ปฏิเสธ")
-r = client.post(f"/pharmacist/1/chat/{chat_id}/prescription", data=rx_form([(1, 25)]))
-check("ฟอร์มคืนค่าที่กรอกไว้หลังถูกปฏิเสธ", 'value="25"' in r.get_data(as_text=True))
+rejected_prescription(1, chat_id, [(1, 0)], "จำนวนยาต้องเป็นจำนวนเต็มมากกว่า 0", "จำนวน 0 -> ปฏิเสธ")
+rejected_prescription(1, chat_id, [(1, "2.5")], "จำนวนยาต้องเป็นจำนวนเต็มมากกว่า 0", "จำนวนไม่ใช่จำนวนเต็ม -> ปฏิเสธ")
+rejected_prescription(1, chat_id, None, "กรุณากรอกขนาดยาและวิธีใช้ให้ครบทุกรายการที่เลือก", "ไม่กรอกขนาดยา/วิธีใช้ -> ปฏิเสธ",
+                      form={"drug_id": "1", "strength": "", "dosage": "", "usage_note": "", "quantity": "2"})
+r = client.post(f"/pharmacist/1/chat/{chat_id}/prescription", data=rx_form([(1, 0)]))
+check("ฟอร์มคืนค่าที่กรอกไว้หลังถูกปฏิเสธ", 'value="0"' in r.get_data(as_text=True))
 
-rx_id = prescribe(1, chat_id, [(2, 10), (1, 2)])     # ลอราทาดีน 10, ยา A 2
+before = snapshot()
+rx_over = prescribe(1, chat_id, [(2, 5), (1, 25)],   # ลอราทาดีน 5, ยา A 25 (คงเหลือ 20)
+                    "จำนวนเกินคงเหลือ (ยา A 25 จาก 20): เภสัชกรออกใบสั่งยาได้ ไม่ถูกปฏิเสธ")
+check("ออกใบสั่งยายังไม่ตัดสต็อก", snapshot()["stock"] == before["stock"])
 r = client.post(f"/pharmacist/1/chat/{chat_id}/prescription", data=rx_form([(1, 1)]))
 check("ออกใบสั่งยาซ้ำในห้องเดิมไม่ได้", "ออกใบสั่งยาไปแล้ว" in r.get_data(as_text=True))
 r = close(1, chat_id)
@@ -147,6 +162,18 @@ check("เภสัชกรปิดห้องแชท -> chat closed, ค�
       and info["queue"] == "completed" and chat_state(chat_id) == "closed", str(info))
 r = client.post(f"/api/chat/{chat_id}/messages", json={"sender_type": "patient", "content": "ขอบคุณค่ะ"})
 check("ห้องปิดแล้วส่งข้อความไม่ได้", r.status_code == 409)
+
+print("\n--- ฝั่งคนไข้ : สั่งซื้อเกินสต็อก -> ปฏิเสธ + ROLLBACK ทั้งใบ ---")
+# บรรทัดที่ 1 (ลอราทาดีน 5) ถูกหักสต็อกไปก่อน แล้วบรรทัดที่ 2 (ยา A 25) ไม่พอ -> ต้องคืนลอราทาดีนด้วย
+rejected_order(1, rx_over, "ยา A (พาราเซตามอล 500 mg) คงเหลือ 20 สั่ง 25 ไม่ได้", "ลอราทาดีน 5 + ยา A 25")
+check("ลอราทาดีนเท่าเดิม (100, 200) และยา A เท่าเดิม (20)", (stock(2), stock(3), stock(1)) == (100, 200, 20),
+      f"(จริง {stock(2)}, {stock(3)}, {stock(1)})")
+
+print("\n--- ทำต่อให้สำเร็จ : คนไข้ 1 ขอรับคำปรึกษาใหม่ ---")
+chat_id = request(1, 2)                              # เภสัชกร 2 ยังไม่เคยได้ห้อง
+reply(2, chat_id)
+rx_id = prescribe(2, chat_id, [(2, 10), (1, 2)])     # ลอราทาดีน 10, ยา A 2
+close(2, chat_id)
 
 check("หน้าใบสั่งยา", client.get(f"/patient/1/prescription/{rx_id}").status_code == 200)
 r = client.post(f"/patient/1/prescription/{rx_id}/order", data={"shipping_address": "12/3 หมู่ 4 ขอนแก่น 40000"})
@@ -176,27 +203,28 @@ before = snapshot()
 r = client.post(f"/patient/1/order/{oid}/pay", data={"method": "bank_transfer", "bank_name": "ธนาคารตัวอย่าง ก"})
 check("จ่ายซ้ำถูกปฏิเสธ ข้อมูลไม่เปลี่ยน", "ชำระเงินแล้ว" in r.get_data(as_text=True) and snapshot() == before)
 
-print("\n=== รอบที่ 2 : ด่านที่ 2 ตรวจสต็อกตอนสั่งซื้อ (สต็อกลดลงหลังออกใบสั่งยา) ===")
-# ยา A เหลือ 18 : ออกใบสั่งยา 2 ใบ ใบละ 10 (ผ่านด่านที่ 1 ทั้งคู่) แล้วคนแรกสั่งซื้อก่อน
-chat2 = request(2, 2)                               # เภสัชกร 2 ยังไม่เคยได้ห้อง
-reply(2, chat2)
-rx2 = prescribe(2, chat2, [(1, 10)])
-close(2, chat2)
-chat3 = request(3, 1)                               # ทั้งคู่ว่าง เภสัชกร 1 ได้ห้องล่าสุดนานกว่า
-reply(1, chat3)
-rx3 = prescribe(1, chat3, [(2, 5), (1, 10)])        # ลอราทาดีน 5 + ยา A 10
-close(1, chat3)
+print("\n=== รอบที่ 2 : สต็อกลดลงหลังออกใบสั่งยา และยาหลายล็อต (ปฏิเสธตอนสั่งซื้อ) ===")
+# ยา A เหลือ 18 : ออกใบสั่งยา 2 ใบ ใบละ 10 แล้วคนแรกสั่งซื้อก่อน
+chat2 = request(2, 1)                               # ทั้งคู่ว่าง เภสัชกร 1 ได้ห้องล่าสุดนานกว่า
+reply(1, chat2)
+rx2 = prescribe(1, chat2, [(1, 10)])
+close(1, chat2)
+chat3 = request(3, 2)                               # ทั้งคู่ว่าง เภสัชกร 2 ได้ห้องล่าสุดนานกว่า
+reply(2, chat3)
+rx3 = prescribe(2, chat3, [(2, 5), (1, 10)])        # ลอราทาดีน 5 + ยา A 10
+close(2, chat3)
 r = client.post(f"/patient/2/prescription/{rx2}/order", data={"shipping_address": "88/9 อุดรธานี 41000"})
 oid2 = scalar("SELECT MAX(order_id) FROM orders WHERE prescription_id = :r", r=rx2)
 check("คนไข้ 2 สั่งซื้อก่อน: ยา A = 8", r.status_code == 302 and stock(1) == 8, f"(จริง {stock(1)})")
-before = snapshot()
-r = client.post(f"/patient/3/prescription/{rx3}/order", data={"shipping_address": "7 หมู่ 2 ขอนแก่น 40150"})
-html = r.get_data(as_text=True)
-check("คนไข้ 3 สั่งซื้อทีหลัง: ระบบปฏิเสธ", r.status_code == 200 and "ยา A (พาราเซตามอล 500 mg) คงเหลือ 8 สั่งได้ไม่เกินนี้" in html)
-after = snapshot()
-check("ROLLBACK: จำนวนแถวและสต็อกทุกล็อตไม่เปลี่ยน (รวมลอราทาดีนที่ถูกหักไปก่อนในบรรทัดที่ 1)", after == before,
-      f"\n   ก่อน {before}\n   หลัง {after}")
-check("ไม่มีคำสั่งซื้อของใบสั่งยานี้", scalar("SELECT COUNT(*) FROM orders WHERE prescription_id = :r", r=rx3) == 0)
+rejected_order(3, rx3, "ยา A (พาราเซตามอล 500 mg) คงเหลือ 8 สั่ง 10 ไม่ได้", "คนไข้ 3 สั่งซื้อทีหลัง")
+
+# ลอราทาดีนเหลือ 90 + 200 = 290 : สั่ง 250 ยอดรวมพอ แต่จ่ายจากล็อตเดียวต่อรายการ และไม่มีล็อตใดมีถึง 250
+chat4 = request(2, 1)
+reply(1, chat4)
+rx4 = prescribe(1, chat4, [(2, 250)])
+close(1, chat4)
+rejected_order(2, rx4, "ลอราทาดีน 10 mg คงเหลือรวม 290 แต่ไม่มีล็อตเดียวที่มีจำนวนพอสำหรับ 250 (ล็อตที่มากที่สุดมี 200)",
+               "ยาหลายล็อต ยอดรวมพอแต่ล็อตเดียวไม่พอ")
 r = client.post(f"/patient/2/order/{oid2}/pay", data={"method": "bank_transfer", "bank_name": "ธนาคารตัวอย่าง ก"})
 slip = db.query_one("SELECT s.transaction_no, s.payer_name, s.payee_name, s.amount FROM transfer_slip s JOIN payment y ON y.payment_id = s.payment_id WHERE y.order_id = :o", o=oid2)
 check("ชำระด้วยการโอน: payment + transfer_slip", r.status_code == 302 and slip is not None and slip["amount"] == 20, str(slip))

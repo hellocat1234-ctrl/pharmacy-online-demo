@@ -310,8 +310,8 @@ def send_message(chat_id, sender_type, content):
 # ---------------------------------------------------------------------
 # 4) เภสัชกรออกใบสั่งยา -> prescription + prescription_detail
 #    ออกได้ขณะห้องแชทยังเปิด (ก่อนกดปิดห้องแชท) ห้องละ 1 ใบ
-#    ด่านที่ 1 ของการตรวจสต็อก : จำนวนที่สั่งต้องไม่เกินคงเหลือรวมของยา ไม่งั้นไม่สร้างใบสั่งยา
-#    (ด่านที่ 2 อยู่ที่ place_order ตอนคนไข้สั่งซื้อ เพราะสต็อกอาจลดลงหลังออกใบสั่งยา)
+#    ตรงนี้กันแค่ยาที่คงเหลือรวม 0 (หมด) ไม่เทียบจำนวนที่สั่งกับคงเหลือ
+#    การกันสต็อกตัวหลักอยู่ที่ place_order ตอนคนไข้สั่งซื้อ (เกินสต็อก -> ROLLBACK ทั้งคำสั่งซื้อ)
 #    items = [{"drug_id", "strength", "dosage", "usage_note", "quantity"}, ...]
 # ---------------------------------------------------------------------
 def issue_prescription(pharmacist_id, chat_id, items):
@@ -334,12 +334,9 @@ def issue_prescription(pharmacist_id, chat_id, items):
         if cur.fetchone()[0] > 0:
             raise DemoError("ห้องแชทนี้ออกใบสั่งยาไปแล้ว")
 
-        # ตรวจสต็อกก่อน INSERT ใด ๆ : รวมจำนวนที่สั่งต่อยา (เผื่อเลือกยาตัวเดียวกันหลายแถว)
-        # แล้วเทียบกับคงเหลือรวมของล็อตที่ยังไม่หมดอายุ
-        wanted = {}
-        for item in items:
-            wanted[item["drug_id"]] = wanted.get(item["drug_id"], 0) + item["quantity"]
-        for drug_id, quantity in wanted.items():
+        # ก่อน INSERT ใด ๆ : ยาที่คงเหลือรวมของล็อตที่ยังไม่หมดอายุเป็น 0 ออกใบสั่งยาไม่ได้
+        # (ไม่เทียบจำนวนที่สั่ง : สั่งเกินคงเหลือได้ แล้วไปถูกปฏิเสธตอนคนไข้สั่งซื้อ)
+        for drug_id in {item["drug_id"] for item in items}:
             cur.execute("""
                 SELECT g.name,
                        NVL((SELECT SUM(b.quantity) FROM drug_batch b
@@ -352,8 +349,6 @@ def issue_prescription(pharmacist_id, chat_id, items):
             drug_name, available = drug
             if available == 0:
                 raise DemoError(f"{drug_name} คงเหลือ 0 ออกใบสั่งยาไม่ได้")
-            if quantity > available:
-                raise DemoError(f"{drug_name} คงเหลือ {available} ออกใบสั่งยาได้ไม่เกินนี้")
 
         # หัวใบสั่งยา : ห้องแชท 1 - 1 ใบสั่งยา (uq_prescription_chat)
         # prescribed_time เก็บเป็นข้อความ HH:MM ตาม DDL
@@ -435,6 +430,12 @@ def place_order(patient_id, prescription_id, shipping_address):
             order_id=order_id_var)
         order_id = order_id_var.getvalue()[0]
 
+        # ใช้ในข้อความปฏิเสธ : จำนวนที่สั่งรวมต่อยา (เผื่อยาตัวเดียวกันหลายบรรทัด)
+        # และจำนวนที่ Transaction นี้หักไปแล้วต่อยา (ยังไม่ COMMIT)
+        wanted, taken = {}, {}
+        for _, drug_id, quantity, _, _ in lines:
+            wanted[drug_id] = wanted.get(drug_id, 0) + quantity
+
         for line_no, drug_id, quantity, drug_name, price in lines:
             # (3) เลือกล็อตที่จะจ่าย แบบ FEFO (First Expired, First Out)
             #     = ล็อตที่ยังไม่หมดอายุ มีจำนวนพอ และหมดอายุเร็วที่สุด (จ่ายจากล็อตเดียวต่อรายการ)
@@ -449,7 +450,7 @@ def place_order(patient_id, prescription_id, shipping_address):
                 drug_id=drug_id, quantity=quantity)
             batch = cur.fetchone()
             if batch is None:
-                _raise_out_of_stock(cur, drug_id, drug_name)
+                _raise_out_of_stock(cur, drug_id, drug_name, quantity, wanted[drug_id], taken.get(drug_id, 0))
             batch_id = batch[0]
 
             # (4) ตัดสต็อก : เงื่อนไข quantity >= :quantity อยู่ใน UPDATE เดียวกับการหัก
@@ -461,7 +462,8 @@ def place_order(patient_id, prescription_id, shipping_address):
                 WHERE  batch_id = :batch_id AND quantity >= :quantity""",
                 quantity=quantity, batch_id=batch_id)
             if cur.rowcount == 0:
-                _raise_out_of_stock(cur, drug_id, drug_name)
+                _raise_out_of_stock(cur, drug_id, drug_name, quantity, wanted[drug_id], taken.get(drug_id, 0))
+            taken[drug_id] = taken.get(drug_id, 0) + quantity
 
             # (5) INSERT order_detail : drug_name และ unit_price เป็น snapshot ณ วันที่สั่งซื้อ
             cur.execute("""
@@ -481,16 +483,26 @@ def place_order(patient_id, prescription_id, shipping_address):
     return _run(work)
 
 
-def _raise_out_of_stock(cur, drug_id, drug_name):
-    """สร้างข้อความปฏิเสธ : จำนวนที่สั่งได้ = จำนวนของล็อตที่ยังไม่หมดอายุที่มีมากที่สุด
-    (เพราะจ่ายจากล็อตเดียวต่อรายการ) การ raise ตรงนี้ทำให้ _run() ROLLBACK ทั้ง Transaction"""
+def _raise_out_of_stock(cur, drug_id, drug_name, quantity, wanted, taken):
+    """สร้างข้อความปฏิเสธจากคงเหลือรวมของยา (ล็อตที่ยังไม่หมดอายุ) เทียบกับจำนวนที่สั่ง
+    quantity = จำนวนของบรรทัดที่ตัดไม่ได้, wanted = จำนวนที่สั่งรวมของยานี้ทั้งใบ,
+    taken = จำนวนที่ Transaction นี้หักไปแล้ว (บวกคืนเพื่อให้ได้คงเหลือก่อนสั่งซื้อ ตรงกับที่หน้าจอแสดง)
+      - คงเหลือรวมไม่พอ                 -> "คงเหลือ N สั่ง Q ไม่ได้"
+      - คงเหลือรวมพอ แต่ล็อตเดียวไม่พอ -> "ไม่มีล็อตเดียวที่มีจำนวนพอ" (จ่ายจากล็อตเดียวต่อรายการ)
+    การ raise ตรงนี้ทำให้ _run() ROLLBACK ทั้ง Transaction"""
     cur.execute("""
-        SELECT NVL(MAX(b.quantity), 0)
+        SELECT NVL(SUM(b.quantity), 0), NVL(MAX(b.quantity), 0)
         FROM   drug_batch b
         WHERE  b.drug_id = :drug_id AND b.expiry_date > TRUNC(SYSDATE)""",
         drug_id=drug_id)
-    available = cur.fetchone()[0]
-    raise DemoError(f"{drug_name} คงเหลือ {available} สั่งได้ไม่เกินนี้ ระบบยกเลิกคำสั่งซื้อทั้งหมดแล้ว")
+    total, largest_lot = cur.fetchone()
+    total += taken
+    if wanted > total:
+        reason = f"{drug_name} คงเหลือ {total} สั่ง {wanted} ไม่ได้"
+    else:
+        reason = (f"{drug_name} คงเหลือรวม {total} แต่ไม่มีล็อตเดียวที่มีจำนวนพอสำหรับ {quantity} "
+                  f"(ล็อตที่มากที่สุดมี {largest_lot})")
+    raise DemoError(f"{reason} ระบบไม่สร้างคำสั่งซื้อและคืนสต็อกทั้งหมดแล้ว")
 
 
 # ---------------------------------------------------------------------

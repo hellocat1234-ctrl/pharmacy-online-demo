@@ -116,16 +116,23 @@ FROM   receipt r
 ORDER  BY r.receipt_id, d.line_no;
 
 -- 9) สต็อกยา (ร้านที่ 1) : ยา A ก่อนทำ = 20, หลังสั่ง 2 เม็ด = 18
+--    drug_total = คงเหลือรวมของล็อตที่ยังไม่หมดอายุ (ตัวเลขใน dropdown และในข้อความปฏิเสธตอนสั่งซื้อ)
+--    กรณีปฏิเสธตอนสั่งซื้อ (ใบสั่งยา ลอราทาดีน 5 + ยา A 25) : รันก่อน/หลังกด "สั่งซื้อ" ตัวเลขต้องเท่าเดิมทุกล็อต
+--    (ลอราทาดีนถูกหักไปก่อนในบรรทัดที่ 1 แล้ว ROLLBACK คืนให้)
 SELECT g.drug_id, g.name, b.lot_no, TO_CHAR(b.expiry_date, 'YYYY-MM-DD') AS expiry_date,
-       b.quantity, TO_CHAR(b.updated_at, 'HH24:MI:SS') AS updated_at
+       b.quantity,
+       SUM(CASE WHEN b.expiry_date > TRUNC(SYSDATE) THEN b.quantity ELSE 0 END)
+           OVER (PARTITION BY g.drug_id) AS drug_total,
+       TO_CHAR(b.updated_at, 'HH24:MI:SS') AS updated_at
 FROM   drug g
        JOIN drug_batch b ON b.drug_id = g.drug_id
 WHERE  g.pharmacy_id = 1
 ORDER  BY g.drug_id, b.expiry_date;
 
 -- 10) สรุปจำนวนแถวต่อตาราง (ใช้เทียบก่อน/หลังกรณีปฏิเสธ : ตัวเลขต้องไม่เปลี่ยน)
---     ปฏิเสธที่ฝั่งเภสัชกร : prescription / prescription_detail ไม่เพิ่ม
---     ปฏิเสธตอนสั่งซื้อ     : orders / order_detail ไม่เพิ่ม และสต็อก (ข้อ 9) ไม่เปลี่ยน
+--     ปฏิเสธตอนสั่งซื้อ (ตัวหลัก, ROLLBACK ทั้งใบ) : ทุกตารางเท่าเดิม orders / order_detail ไม่เพิ่ม
+--                                                 และสต็อก (ข้อ 9) ไม่เปลี่ยน
+--     ปฏิเสธที่ฝั่งเภสัชกร (เลือกยาที่หมด หรือกรอกไม่ครบ) : prescription / prescription_detail ไม่เพิ่ม
 SELECT 'consult_queue' AS table_name, COUNT(*) AS row_count FROM consult_queue UNION ALL
 SELECT 'chat_room',           COUNT(*) FROM chat_room           UNION ALL
 SELECT 'chat_message',        COUNT(*) FROM chat_message        UNION ALL

@@ -435,7 +435,7 @@ def pharmacist_prescribe(phid, chat_id):
                           "quantity": int(quantity)})
         tx.issue_prescription(phid, chat_id, items)
     except DemoError as exc:
-        # ถูกปฏิเสธ (เช่น สต็อกไม่พอ) : ไม่มีใบสั่งยาถูกสร้าง คืนค่าที่กรอกไว้ให้แก้ต่อได้
+        # ถูกปฏิเสธ (เช่น ยาหมด หรือกรอกไม่ครบ) : ไม่มีใบสั่งยาถูกสร้าง คืนค่าที่กรอกไว้ให้แก้ต่อได้
         form_rows = [{"drug_id": r[0], "dosage": r[2], "usage_note": r[3], "quantity": r[4]} for r in rows]
         return render_pharmacist_chat(phid, chat_id, error=str(exc), form_rows=form_rows)
     return redirect(url_for("pharmacist_chat", phid=phid, chat_id=chat_id))
