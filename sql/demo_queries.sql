@@ -85,7 +85,9 @@ FROM   prescription r
        JOIN pharmacist f ON f.pharmacist_id = r.pharmacist_id
 ORDER  BY r.prescription_id, d.line_no;
 
--- 5) คำสั่งซื้อ (status: pending_payment -> paid)
+-- 5) คำสั่งซื้อ (status: pending_payment -> paid) รันนี่
+--    กรณีระบบปฏิเสธตอนสั่งซื้อ (เช่น สต็อกไม่พอ) : มีแถว status = rejected เป็นร่องรอย (ไม่มี order_detail ในข้อ 6)
+--    ใบสั่งยาเดียวกันสั่งใหม่ได้ : จะมีแถว rejected และแถว pending_payment / paid ของ prescription_id เดียวกัน
 SELECT o.order_id, o.patient_id, o.prescription_id, o.status, o.shipping_address,
        TO_CHAR(o.ordered_at, 'HH24:MI:SS') AS ordered_at
 FROM   orders o
@@ -106,7 +108,7 @@ FROM   payment y
        LEFT JOIN transfer_slip s ON s.payment_id = y.payment_id
 ORDER  BY y.payment_id;
 
--- 8) ใบเสร็จ + รายละเอียด
+-- 8) ใบเสร็จ + รายละเอียด  รันนี่ 
 SELECT r.receipt_id, r.receipt_no, r.order_id, ph.name AS pharmacy,
        d.line_no, g.name AS drug, d.quantity, d.unit_price, d.total_amount
 FROM   receipt r
@@ -115,8 +117,8 @@ FROM   receipt r
        JOIN pharmacy      ph ON ph.pharmacy_id = r.pharmacy_id
 ORDER  BY r.receipt_id, d.line_no;
 
--- 9) สต็อกยา (ร้านที่ 1) : ยา A ก่อนทำ = 20, หลังสั่ง 2 เม็ด = 18
---    drug_total = คงเหลือรวมของล็อตที่ยังไม่หมดอายุ (ตัวเลขใน dropdown และในข้อความปฏิเสธตอนสั่งซื้อ)
+-- 9) สต็อกยา (ร้านที่ 1) : ยา A ก่อนทำ = 20, หลังสั่ง 2 เม็ด = 18  รันนี่
+--    drug_total = คงเหลือรวมของล็อตที่ยังไม่หมดอายุ (ตัวเลขในช่องค้นหายาและในข้อความปฏิเสธตอนสั่งซื้อ)
 --    กรณีปฏิเสธตอนสั่งซื้อ (ใบสั่งยา ลอราทาดีน 5 + ยา A 25) : รันก่อน/หลังกด "สั่งซื้อ" ตัวเลขต้องเท่าเดิมทุกล็อต
 --    (ลอราทาดีนถูกหักไปก่อนในบรรทัดที่ 1 แล้ว ROLLBACK คืนให้)
 SELECT g.drug_id, g.name, b.lot_no, TO_CHAR(b.expiry_date, 'YYYY-MM-DD') AS expiry_date,
@@ -129,10 +131,12 @@ FROM   drug g
 WHERE  g.pharmacy_id = 1
 ORDER  BY g.drug_id, b.expiry_date;
 
--- 10) สรุปจำนวนแถวต่อตาราง (ใช้เทียบก่อน/หลังกรณีปฏิเสธ : ตัวเลขต้องไม่เปลี่ยน)
---     ปฏิเสธตอนสั่งซื้อ (ตัวหลัก, ROLLBACK ทั้งใบ) : ทุกตารางเท่าเดิม orders / order_detail ไม่เพิ่ม
---                                                 และสต็อก (ข้อ 9) ไม่เปลี่ยน
+-- 10) สรุปจำนวนแถวต่อตาราง (ใช้เทียบก่อน/หลังกรณีปฏิเสธ)
+--     ปฏิเสธตอนสั่งซื้อ (ตัวหลัก, ROLLBACK ทั้งใบ) : orders เพิ่ม 1 แถว (status = rejected เป็นร่องรอย)
+--                                                 order_detail และตารางอื่นเท่าเดิม สต็อก (ข้อ 9) ไม่เปลี่ยน
 --     ปฏิเสธที่ฝั่งเภสัชกร (เลือกยาที่หมด หรือกรอกไม่ครบ) : prescription / prescription_detail ไม่เพิ่ม
+-- "ตรวจฐานข้อมูลอีกครั้ง ทั้ง 12 ตารางเท่าเดิมทุกตัว ไม่มีคำสั่งซื้อค้าง ไม่มีใบเสร็จหลุด และสต็อกทั้งยา A กับลอราทาดีนไม่ลดครับ
+--  สรุปก็คือ ตอนแรกระบบตัดสต็อกลอราทาดีนไปก่อน แล้วพบว่ายา A ไม่พอ ธุรกรรมถูก ROLLBACK คืนค่าทั้งหมดครับ"
 SELECT 'consult_queue' AS table_name, COUNT(*) AS row_count FROM consult_queue UNION ALL
 SELECT 'chat_room',           COUNT(*) FROM chat_room           UNION ALL
 SELECT 'chat_message',        COUNT(*) FROM chat_message        UNION ALL

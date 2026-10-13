@@ -140,17 +140,12 @@
         {% for row in form_rows[:3] %}
         <div class="rounded-lg border border-slate-200 bg-slate-50/40 p-2.5 space-y-2">
           <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">รายการที่ {{ loop.index }} · เลือกยา</label>
-            <div class="relative">
-              <select class="w-full text-xs sm:text-sm bg-none bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:ring-teal-500 focus:border-teal-500 appearance-none pr-8" name="drug_id">
-                <option value="">- ไม่เลือก -</option>
-                {% for g in drugs %}
-                <option value="{{ g.drug_id }}" {% if g.stock == 0 %}disabled{% elif row.drug_id == g.drug_id|string %}selected{% endif %}>{{ g.name }} ({{ 'หมด' if g.stock == 0 else 'เหลือ %s'|format(g.stock) }})</option>
-                {% endfor %}
-              </select>
-              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
-              </div>
+            <label class="block text-xs font-medium text-slate-600 mb-1" for="drug-search-{{ loop.index }}">รายการที่ {{ loop.index }} · ค้นหายา <span class="font-normal text-slate-400">(พิมพ์ชื่อยาหรือรหัสยา)</span></label>
+            <!-- ช่องค้นหายาแบบ type-ahead (drugsearch.js) : ยาที่เลือกเก็บใน drug_id ที่ซ่อนอยู่ ว่าง = ไม่ใช้แถวนี้ -->
+            <div class="drug-search relative">
+              <input type="hidden" name="drug_id" value="{{ row.drug_id if row.drug_label else '' }}">
+              <input class="drug-search-input w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:ring-teal-500 focus:border-teal-500" id="drug-search-{{ loop.index }}" type="text" maxlength="100" autocomplete="off" placeholder="เช่น พารา หรือ 1" value="{{ row.drug_label or '' }}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="drug-results-{{ loop.index }}">
+              <ul class="drug-results d-none" id="drug-results-{{ loop.index }}" role="listbox"></ul>
             </div>
             <input type="hidden" name="strength" value="">
           </div>
@@ -195,4 +190,10 @@
     hasPrescription: {{ 'true' if chat.prescription_id else 'false' }}
   });
 </script>
+{% if role == 'pharmacist' %}
+<script src="{{ url_for('static', filename='drugsearch.js') }}"></script>
+<script>
+  startDrugSearch("{{ url_for('api_drug_search', phid=pharmacist.pharmacist_id) }}");
+</script>
+{% endif %}
 {% endblock %}

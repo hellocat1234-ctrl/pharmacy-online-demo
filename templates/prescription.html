@@ -40,6 +40,9 @@
           <span>ที่อยู่จัดส่ง <span class="text-slate-400 font-normal">(ใช้ที่อยู่ของผู้ป่วย แก้ไขได้)</span></span>
         </label>
         <textarea class="w-full text-xs text-slate-700 leading-relaxed bg-white border border-slate-200 rounded-md px-2.5 py-2 focus:ring-teal-500 focus:border-teal-500 resize-none" id="shipping_address" name="shipping_address" form="order-form" rows="2" maxlength="500" required>{{ shipping_address }}</textarea>
+        {% if rx.rejected_count %}
+        <p class="mt-1.5 text-rose-700">ใบสั่งยานี้เคยถูกปฏิเสธตอนสั่งซื้อ {{ rx.rejected_count }} ครั้ง (ดูได้ในประวัติคำสั่งซื้อ) สั่งซื้อใหม่ได้เมื่อสต็อกพอ</p>
+        {% endif %}
       {% endif %}
     </div>
   </div>

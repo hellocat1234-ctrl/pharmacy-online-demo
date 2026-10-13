@@ -91,7 +91,9 @@
           <div class="text-[11px] text-slate-500 mt-0.5">ภก. {{ r.pharmacist_name }}</div>
         </div>
         <div class="flex flex-col items-end">
-          {% if not r.order_id %}
+          {% if not r.order_id and r.rejected_count %}
+            <span class="px-3 py-1 bg-rose-100 text-rose-800 border border-rose-200 font-medium text-xs rounded">{{ 'rejected'|th }} · สั่งซื้อใหม่ได้</span>
+          {% elif not r.order_id %}
             <span class="px-3 py-1 bg-[#fb923c] text-white font-medium text-xs rounded shadow-sm">ยังไม่ได้สั่งซื้อ</span>
           {% else %}
             <span class="px-3 py-1 {{ 'bg-[#38bdf8]' if r.order_status == 'pending_payment' else 'bg-[#4ade80]' }} text-white font-medium text-xs rounded">{{ r.order_status|th }}</span>

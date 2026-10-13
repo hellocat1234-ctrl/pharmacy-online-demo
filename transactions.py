@@ -2,34 +2,79 @@
 
 หลักการที่ใช้ทุกฟังก์ชัน
   1. หนึ่งฟังก์ชัน = หนึ่ง Transaction : สำเร็จทั้งหมดแล้ว COMMIT, ผิดพลาดจุดใดก็ ROLLBACK ทั้งหมด
+     (คำสั่งซื้อที่ระบบปฏิเสธ : ROLLBACK ก่อน แล้วบันทึกแถว orders สถานะ rejected ใน Transaction ใหม่)
   2. ใช้ bind variable (:ชื่อ) ทุก query ไม่ต่อสตริง SQL
   3. สร้าง id ด้วย SEQUENCE ใน DDL (seq_xxx.NEXTVAL) แล้วรับค่ากลับด้วย RETURNING ... INTO
 """
+import logging
+
 import oracledb
 
 import db
+
+log = logging.getLogger(__name__)
 
 
 class DemoError(Exception):
     """ข้อผิดพลาดทางธุรกิจ : ข้อความเป็นภาษาไทย ใช้แสดงบนหน้าจอได้เลย"""
 
 
-def _run(work):
-    """ครอบ Transaction : เรียก work(cur) แล้ว COMMIT, ถ้ามี error ใด ๆ ให้ ROLLBACK ทั้งหมด"""
+class RejectedError(DemoError):
+    """ระบบปฏิเสธรายการเอง (สต็อกไม่พอ หรือฐานข้อมูลปฏิเสธ เช่น ผิด CHECK / UNIQUE / FK)
+    ต่างจาก DemoError ทั่วไปที่เกิดจากการกรอกข้อมูล (ที่อยู่ว่าง, ไม่พบใบสั่งยา, สั่งซ้ำ)
+    ตรงที่ _run() จะบันทึกร่องรอยเป็นคำสั่งซื้อสถานะ rejected ให้
+    rejected_order_id = เลขที่คำสั่งซื้อ rejected ที่บันทึกได้ (None ถ้าไม่ได้บันทึก)"""
+    rejected_order_id = None
+
+
+def _run(work, rejected_order=None):
+    """ครอบ Transaction : เรียก work(cur) แล้ว COMMIT, ถ้ามี error ใด ๆ ให้ ROLLBACK ทั้งหมด
+    rejected_order = (patient_id, prescription_id, shipping_address) ส่งมาเฉพาะจาก place_order :
+    ถ้าระบบปฏิเสธ (RejectedError) ให้บันทึกร่องรอยเป็น orders สถานะ rejected หลัง ROLLBACK"""
     conn = db.connect()
     try:
         with conn.cursor() as cur:
             result = work(cur)
         conn.commit()          # COMMIT : ทุกคำสั่งใน work() มีผลพร้อมกัน
         return result
-    except DemoError:
+    except DemoError as exc:
         conn.rollback()        # ROLLBACK : ยกเลิกทุกคำสั่งที่ทำไปแล้วใน Transaction นี้
+        if isinstance(exc, RejectedError):
+            _record_rejected_order(exc, rejected_order)
         raise
     except oracledb.Error as exc:
         conn.rollback()        # error จากฐานข้อมูล (เช่น ผิด CHECK / UNIQUE / FK) ก็ ROLLBACK เช่นกัน
-        raise DemoError(f"ฐานข้อมูลปฏิเสธรายการ ระบบยกเลิกทั้งหมดแล้ว ({exc})") from exc
+        error = RejectedError(f"ฐานข้อมูลปฏิเสธรายการ ระบบยกเลิกทั้งหมดแล้ว ({exc})")
+        _record_rejected_order(error, rejected_order)
+        raise error from exc
     finally:
         conn.close()           # คืน connection ให้ pool
+
+
+def _record_rejected_order(error, rejected_order):
+    """บันทึกร่องรอยคำสั่งซื้อที่ระบบปฏิเสธ : Transaction ใหม่บน connection ใหม่ (งานหลักถูก ROLLBACK ไปแล้ว)
+    INSERT orders แถวเดียว สถานะ rejected แล้ว COMMIT  ไม่มี order_detail และไม่ตัดสต็อก
+    ถ้าบันทึกไม่สำเร็จ : log ไว้ แล้วปล่อยให้ผู้เรียก raise error เดิมต่อ (ไม่กลบ error เดิม)"""
+    if rejected_order is None:
+        return
+    patient_id, prescription_id, shipping_address = rejected_order
+    try:
+        conn = db.connect()
+        try:
+            with conn.cursor() as cur:
+                order_id_var = cur.var(int)
+                cur.execute("""
+                    INSERT INTO orders (order_id, patient_id, prescription_id, status, shipping_address)
+                    VALUES (seq_orders.NEXTVAL, :patient_id, :rx_id, 'rejected', :shipping_address)
+                    RETURNING order_id INTO :order_id""",
+                    patient_id=patient_id, rx_id=prescription_id, shipping_address=shipping_address,
+                    order_id=order_id_var)
+            conn.commit()
+            error.rejected_order_id = order_id_var.getvalue()[0]
+        finally:
+            conn.close()
+    except oracledb.Error:
+        log.exception("บันทึกคำสั่งซื้อ rejected ไม่สำเร็จ (ใบสั่งยา %s) : %s", prescription_id, error)
 
 
 # ---------------------------------------------------------------------
@@ -311,7 +356,7 @@ def send_message(chat_id, sender_type, content):
 # 4) เภสัชกรออกใบสั่งยา -> prescription + prescription_detail
 #    ออกได้ขณะห้องแชทยังเปิด (ก่อนกดปิดห้องแชท) ห้องละ 1 ใบ
 #    ตรงนี้กันแค่ยาที่คงเหลือรวม 0 (หมด) ไม่เทียบจำนวนที่สั่งกับคงเหลือ
-#    การกันสต็อกตัวหลักอยู่ที่ place_order ตอนคนไข้สั่งซื้อ (เกินสต็อก -> ROLLBACK ทั้งคำสั่งซื้อ)
+#    การกันสต็อกตัวหลักอยู่ที่ place_order ตอนคนไข้สั่งซื้อ (เกินสต็อก -> ROLLBACK ทั้งคำสั่งซื้อ + บันทึก rejected)
 #    items = [{"drug_id", "strength", "dosage", "usage_note", "quantity"}, ...]
 # ---------------------------------------------------------------------
 def issue_prescription(pharmacist_id, chat_id, items):
@@ -392,7 +437,8 @@ def issue_prescription(pharmacist_id, chat_id, items):
 # ---------------------------------------------------------------------
 # 5) คนไข้สั่งซื้อตามใบสั่งยา  ** Transaction หลักของ Demo **
 #    INSERT orders + order_detail และ UPDATE drug_batch (ตัดสต็อก) ต้องสำเร็จพร้อมกันทั้งหมด
-#    ถ้ายารายการใดสต็อกไม่พอ -> ROLLBACK ทั้งคำสั่งซื้อ ข้อมูลในฐานข้อมูลไม่เปลี่ยน
+#    ถ้ายารายการใดสต็อกไม่พอ -> ROLLBACK ทั้งคำสั่งซื้อ สต็อกไม่เปลี่ยน
+#    แล้ว _run() บันทึกร่องรอยเป็น orders สถานะ rejected 1 แถว (ไม่มี order_detail)
 # ---------------------------------------------------------------------
 def place_order(patient_id, prescription_id, shipping_address):
     shipping_address = (shipping_address or "").strip()
@@ -416,7 +462,10 @@ def place_order(patient_id, prescription_id, shipping_address):
             raise DemoError("ไม่พบใบสั่งยานี้")
 
         # ใบสั่งยา 1 - 1 คำสั่งซื้อ (uq_orders_prescription) : ตรวจก่อนเพื่อให้ข้อความอ่านง่าย
-        cur.execute("SELECT COUNT(*) FROM orders WHERE prescription_id = :rx_id", rx_id=prescription_id)
+        # ไม่นับคำสั่งซื้อที่ถูกปฏิเสธ (rejected) : ใบสั่งยาที่เคยถูกปฏิเสธสั่งซื้อใหม่ได้
+        cur.execute("""
+            SELECT COUNT(*) FROM orders
+            WHERE  prescription_id = :rx_id AND status <> 'rejected'""", rx_id=prescription_id)
         if cur.fetchone()[0] > 0:
             raise DemoError("ใบสั่งยานี้ถูกสั่งซื้อไปแล้ว")
 
@@ -480,7 +529,7 @@ def place_order(patient_id, prescription_id, shipping_address):
 
         return order_id
 
-    return _run(work)
+    return _run(work, rejected_order=(patient_id, prescription_id, shipping_address))
 
 
 def _raise_out_of_stock(cur, drug_id, drug_name, quantity, wanted, taken):
@@ -489,7 +538,7 @@ def _raise_out_of_stock(cur, drug_id, drug_name, quantity, wanted, taken):
     taken = จำนวนที่ Transaction นี้หักไปแล้ว (บวกคืนเพื่อให้ได้คงเหลือก่อนสั่งซื้อ ตรงกับที่หน้าจอแสดง)
       - คงเหลือรวมไม่พอ                 -> "คงเหลือ N สั่ง Q ไม่ได้"
       - คงเหลือรวมพอ แต่ล็อตเดียวไม่พอ -> "ไม่มีล็อตเดียวที่มีจำนวนพอ" (จ่ายจากล็อตเดียวต่อรายการ)
-    การ raise ตรงนี้ทำให้ _run() ROLLBACK ทั้ง Transaction"""
+    การ raise ตรงนี้ทำให้ _run() ROLLBACK ทั้ง Transaction แล้วบันทึกคำสั่งซื้อสถานะ rejected"""
     cur.execute("""
         SELECT NVL(SUM(b.quantity), 0), NVL(MAX(b.quantity), 0)
         FROM   drug_batch b
@@ -502,7 +551,7 @@ def _raise_out_of_stock(cur, drug_id, drug_name, quantity, wanted, taken):
     else:
         reason = (f"{drug_name} คงเหลือรวม {total} แต่ไม่มีล็อตเดียวที่มีจำนวนพอสำหรับ {quantity} "
                   f"(ล็อตที่มากที่สุดมี {largest_lot})")
-    raise DemoError(f"{reason} ระบบไม่สร้างคำสั่งซื้อและคืนสต็อกทั้งหมดแล้ว")
+    raise RejectedError(f"สต็อกไม่พอ: {reason} ระบบยกเลิกคำสั่งซื้อและคืนสต็อกทั้งหมดแล้ว")
 
 
 # ---------------------------------------------------------------------
@@ -533,6 +582,8 @@ def pay_order(patient_id, order_id, method, bank_name=None):
         if row is None:
             raise DemoError("ไม่พบคำสั่งซื้อนี้")
         status, patient_name, pharmacy_id, pharmacy_name, amount = row
+        if status == "rejected":
+            raise DemoError("คำสั่งซื้อนี้ถูกปฏิเสธ ชำระเงินไม่ได้")
         if status != "pending_payment":
             raise DemoError("คำสั่งซื้อนี้ชำระเงินแล้ว")
 

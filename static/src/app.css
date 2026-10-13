@@ -111,6 +111,23 @@
     @apply bg-rose-50 text-rose-600 border-rose-200;
   }
 
+  /* ช่องค้นหายา : drugsearch.js สร้าง <li> ใน .drug-results และสลับ class active / disabled / empty */
+  .drug-results {
+    @apply absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 text-xs shadow-lg sm:text-sm;
+  }
+  .drug-results li {
+    @apply cursor-pointer px-3 py-2 text-slate-700;
+  }
+  .drug-results li.active {
+    @apply bg-teal-600 text-white;
+  }
+  .drug-results li.disabled {
+    @apply cursor-not-allowed text-slate-400;
+  }
+  .drug-results li.empty {
+    @apply cursor-default text-slate-400;
+  }
+
   /* ตัวนับเวลาถอยหลัง : poll.js เพิ่ม text-danger เมื่อเหลือไม่เกิน 1 นาที */
   .countdown.text-danger {
     @apply text-rose-700 font-bold;
