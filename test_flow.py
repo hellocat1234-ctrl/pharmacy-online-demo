@@ -1,12 +1,17 @@
-"""ทดสอบ 1 รอบเต็ม + กรณีปฏิเสธตอนสั่งซื้อ (ROLLBACK) + คิวรอ/VIP + ตัวนับเวลาตอบกลับ ผ่าน route ของ Flask กับฐานข้อมูล Oracle จริง
+"""ทดสอบ 1 รอบเต็ม + ค้นหายา + กรณีปฏิเสธตอนสั่งซื้อ (ROLLBACK + แถว rejected) + คิวรอรับเคส/VIP/รับเคสพร้อมกัน
++ ตัวนับเวลาตอบกลับ ผ่าน route ของ Flask กับฐานข้อมูล Oracle จริง
 
-รัน reset.bat ก่อน แล้วสั่ง:  python test_flow.py
+รัน migrate.bat (ครั้งเดียว) และ reset.bat ก่อน แล้วสั่ง:  python test_flow.py
 (สคริปต์นี้สร้างข้อมูลทดสอบจริงในฐานข้อมูล ต้องรัน reset.bat อีกครั้งก่อน Demo)
-คนไข้ 1-3 เป็นสมาชิกทั่วไป คนไข้ 4 เป็น VIP, เภสัชกร 1-2 ถือห้องเปิดได้คนละ 1 ห้อง
+คนไข้ 1-3 เป็นสมาชิกทั่วไป คนไข้ 4 เป็น VIP, เภสัชกร 1-2 เลือกรับเคสเอง รับได้หลายเคสพร้อมกัน
 """
 import re
 import sys
+import threading
 
+import oracledb
+
+import app as app_module
 import db
 import transactions as tx
 from app import app
@@ -26,6 +31,13 @@ def scalar(sql, **binds):
     return list(db.query_one(sql, **binds).values())[0]
 
 
+def execute(sql, **binds):
+    """แก้ข้อมูลตรง ๆ เพื่อจัดฉากทดสอบ (เช่น ตั้งสต็อก, ย้อนเวลา)"""
+    with db.connect() as conn:
+        conn.cursor().execute(sql, binds)
+        conn.commit()
+
+
 def stock(batch_id):
     return scalar("SELECT quantity FROM drug_batch WHERE batch_id = :b", b=batch_id)
 
@@ -41,9 +53,9 @@ def snapshot():
 
 
 def latest(pid):
-    """การขอคำปรึกษาครั้งล่าสุดของคนไข้ : สถานะคิว, ห้องแชท, เภสัชกรที่ถูกจับคู่"""
+    """การขอคำปรึกษาครั้งล่าสุดของคนไข้ : คิว, สถานะคิว, ห้องแชท, เภสัชกรที่รับเคส"""
     return db.query_one("""
-        SELECT q.status AS queue, c.chat_id, c.pharmacist_id, c.status AS chat
+        SELECT q.queue_id, q.status AS queue, q.symptom_note, c.chat_id, c.pharmacist_id, c.status AS chat
         FROM   consult_queue q LEFT JOIN chat_room c ON c.queue_id = q.queue_id
         WHERE  q.patient_id = :p ORDER BY q.queue_id DESC FETCH FIRST 1 ROW ONLY""", p=pid)
 
@@ -54,7 +66,7 @@ def chat_state(chat_id):
 
 
 def position(pid):
-    """ลำดับในคิวที่ API polling ส่งให้หน้าหลักคนไข้ (None ถ้าไม่ได้รอจับคู่)"""
+    """ลำดับในคิวที่ API polling ส่งให้หน้าหลักคนไข้ (None ถ้าไม่ได้รอรับเคส)"""
     return client.get(f"/api/patient/{pid}/state").get_json()["state"][0].get("position")
 
 
@@ -63,12 +75,31 @@ def open_chats():
         "SELECT pharmacist_id, COUNT(*) AS n FROM chat_room WHERE status = 'open' GROUP BY pharmacist_id")}
 
 
-def request(pid, expect_pharmacist):
-    """คนไข้กดปุ่มเดียว -> คิว + จับคู่เภสัชกร + ห้องแชท "รอตอบกลับ"  คืน chat_id"""
-    r = client.post(f"/patient/{pid}/queue")
+def waiting_count():
+    return scalar("SELECT COUNT(*) FROM consult_queue WHERE status = 'waiting'")
+
+
+def enqueue(pid, note=""):
+    """คนไข้กด "ขอรับคำปรึกษา" พร้อมอาการเบื้องต้น -> คิว waiting ยังไม่มีห้องแชท  คืน queue_id"""
+    r = client.post(f"/patient/{pid}/queue", data={"symptom_note": note})
     info = latest(pid)
-    check(f"คนไข้ {pid} ขอรับคำปรึกษา: ระบบจับคู่เภสัชกร {expect_pharmacist} เอง, ห้อง 'รอตอบกลับ'",
-          r.status_code == 302 and info["queue"] == "in_progress" and info["pharmacist_id"] == expect_pharmacist
+    assert r.status_code == 302 and info["queue"] == "waiting" and info["chat_id"] is None, (r.status_code, info)
+    return info["queue_id"]
+
+
+def claim(phid, queue_id, c=None):
+    """เภสัชกรกด "รับเคส" : คืน response (302 ไปห้องแชทถ้าสำเร็จ, 200 พร้อมข้อความถ้าไม่สำเร็จ)"""
+    return (c or client).post(f"/pharmacist/{phid}/queue/{queue_id}/claim")
+
+
+def request(pid, phid, note=""):
+    """คนไข้เข้าคิว แล้วเภสัชกร phid รับเคส -> ห้องแชท "รอตอบกลับ"  คืน chat_id"""
+    queue_id = enqueue(pid, note)
+    r = claim(phid, queue_id)
+    info = latest(pid)
+    check(f"คนไข้ {pid} เข้าคิว เภสัชกร {phid} กดรับเคส: คิว in_progress, ห้อง 'รอตอบกลับ'",
+          r.status_code == 302 and r.location.endswith(f"/pharmacist/{phid}/chat/{info['chat_id']}")
+          and info["queue"] == "in_progress" and info["pharmacist_id"] == phid
           and info["chat"] == "open" and chat_state(info["chat_id"]) == "waiting_reply", str(info))
     return info["chat_id"]
 
@@ -99,34 +130,93 @@ def close(phid, chat_id):
     return client.post(f"/pharmacist/{phid}/chat/{chat_id}/close")
 
 
+def consult(pid, phid, lines):
+    """รอบปรึกษาสั้น ๆ : เข้าคิว -> รับเคส -> ตอบ -> ออกใบสั่งยา -> ปิดห้อง  คืน prescription_id"""
+    chat_id = request(pid, phid)
+    reply(phid, chat_id)
+    rx_id = prescribe(phid, chat_id, lines)
+    close(phid, chat_id)
+    return rx_id
+
+
 def rejected_prescription(phid, chat_id, lines, message, label, form=None):
     before = snapshot()
     r = client.post(f"/pharmacist/{phid}/chat/{chat_id}/prescription", data=form or rx_form(lines))
     html = r.get_data(as_text=True)
     check(label, r.status_code == 200 and "ระบบปฏิเสธรายการ:" in html and message in html and snapshot() == before,
-          "(ข้อความถูกต้อง, ไม่มีแถวใหม่ใน prescription/prescription_detail)")
+          "(ข้อความถูกต้อง, ไม่มีแถวใหม่ในตารางใดเลย)")
+
+
+ADDRESS = "7 หมู่ 2 ขอนแก่น 40150"
 
 
 def rejected_order(pid, rx_id, message, label):
-    """คนไข้กดสั่งซื้อแล้วถูกปฏิเสธ : ข้อความถูกต้อง และ ROLLBACK ทั้งใบ (จำนวนแถวทุกตาราง + สต็อกทุกล็อตเท่าเดิม)"""
+    """คนไข้กดสั่งซื้อแล้วระบบปฏิเสธ : ข้อความถูกต้อง, ROLLBACK งานหลักทั้งใบ (สต็อกทุกล็อตเท่าเดิม)
+    และเหลือร่องรอยเป็น orders สถานะ rejected เพิ่ม 1 แถวเท่านั้น  คืน order_id ของแถว rejected"""
     before = snapshot()
-    r = client.post(f"/patient/{pid}/prescription/{rx_id}/order", data={"shipping_address": "7 หมู่ 2 ขอนแก่น 40150"})
+    r = client.post(f"/patient/{pid}/prescription/{rx_id}/order", data={"shipping_address": ADDRESS})
     html = r.get_data(as_text=True)
     after = snapshot()
-    check(f"{label}: ระบบปฏิเสธ", r.status_code == 200 and "ระบบปฏิเสธรายการ:" in html
-          and f"{message} ระบบไม่สร้างคำสั่งซื้อและคืนสต็อกทั้งหมดแล้ว" in html, message)
-    check(f"{label}: ROLLBACK จำนวนแถวทุกตารางและสต็อกทุกล็อตเท่าเดิม", after == before, f"\n   ก่อน {before}\n   หลัง {after}")
-    check(f"{label}: ไม่มีคำสั่งซื้อของใบสั่งยานี้ และยังไม่บันทึกล็อตที่จ่าย",
-          scalar("SELECT COUNT(*) FROM orders WHERE prescription_id = :r", r=rx_id) == 0
-          and scalar("SELECT COUNT(batch_id) FROM prescription_detail WHERE prescription_id = :r", r=rx_id) == 0)
+    check(f"{label}: หน้าเว็บแสดงเหตุผลที่ถูกปฏิเสธ", r.status_code == 200 and "ระบบปฏิเสธรายการ:" in html
+          and f"สต็อกไม่พอ: {message} ระบบยกเลิกคำสั่งซื้อและคืนสต็อกทั้งหมดแล้ว" in html
+          and "สถานะ “ถูกปฏิเสธ”" in html, message)
+    expected = dict(before, ORDERS=before["ORDERS"] + 1)
+    check(f"{label}: เพิ่มเฉพาะ orders 1 แถว ตารางอื่นและสต็อกทุกล็อตเท่าเดิม", after == expected,
+          f"\n   ก่อน {before}\n   หลัง {after}")
+    row = db.query_one("""
+        SELECT o.order_id, o.status, o.patient_id, o.shipping_address,
+               (SELECT COUNT(*) FROM order_detail d WHERE d.order_id = o.order_id) AS details
+        FROM   orders o WHERE o.prescription_id = :r ORDER BY o.order_id DESC FETCH FIRST 1 ROW ONLY""", r=rx_id)
+    check(f"{label}: แถวใหม่เป็น status = rejected ของคนไข้/ที่อยู่ที่กรอก ไม่มี order_detail และยังไม่บันทึกล็อตที่จ่าย",
+          row is not None and row["status"] == "rejected" and row["patient_id"] == pid
+          and row["shipping_address"] == ADDRESS and row["details"] == 0
+          and f"คำสั่งซื้อเลขที่ {row['order_id']} " in html
+          and scalar("SELECT COUNT(batch_id) FROM prescription_detail WHERE prescription_id = :r", r=rx_id) == 0, str(row))
+    return row["order_id"]
 
 
-print("=== รอบที่ 1 : ปฏิเสธตอนสั่งซื้อ (ROLLBACK) แล้วทำฟังก์ชันหลักครบวงจร (คนไข้ 1) ===")
+def search(q=None, phid=1):
+    """เรียก API ช่องค้นหายา คืน (status, รายการยา)"""
+    r = client.get(f"/api/pharmacist/{phid}/drugs", query_string=None if q is None else {"q": q})
+    return r.status_code, (r.get_json() or {}).get("drugs")
+
+
+def found(q):
+    status, drugs = search(q)
+    return status, [d["drug_id"] for d in drugs]
+
+
+print("=== ตรวจ schema หลัง migration ===")
+check("chk_orders_status รองรับ 'rejected'", "'rejected'" in scalar(
+    "SELECT search_condition_vc FROM user_constraints WHERE constraint_name = 'CHK_ORDERS_STATUS'"))
+check("uq_orders_prescription เป็น unique index แบบมีเงื่อนไข (function-based)", db.query_one(
+    "SELECT uniqueness, index_type FROM user_indexes WHERE index_name = 'UQ_ORDERS_PRESCRIPTION'")
+    == {"uniqueness": "UNIQUE", "index_type": "FUNCTION-BASED NORMAL"})
+check("consult_queue.symptom_note VARCHAR2(500 CHAR) NULL ได้", db.query_one(
+    "SELECT data_type, char_length, char_used, nullable FROM user_tab_columns "
+    "WHERE table_name = 'CONSULT_QUEUE' AND column_name = 'SYMPTOM_NOTE'")
+    == {"data_type": "VARCHAR2", "char_length": 500, "char_used": "C", "nullable": "Y"})
+
+print("\n=== รอบที่ 1 : ปฏิเสธตอนสั่งซื้อ (ROLLBACK + rejected) แล้วทำฟังก์ชันหลักครบวงจร (คนไข้ 1) ===")
 check("ก่อนทำ: ยา A = 20", stock(1) == 20, f"(จริง {stock(1)})")
 check("seed: เภสัชกร 2 คนร้านเดียวกัน, คนไข้ 4 คน, VIP 1 คน",
       scalar("SELECT COUNT(*) FROM pharmacist WHERE pharmacy_id = 1") == 2
       and scalar("SELECT COUNT(*) FROM patient") == 4 and scalar("SELECT COUNT(*) FROM patient WHERE is_vip = 1") == 1)
-chat_id = request(1, 1)
+home = client.get("/patient/1").get_data(as_text=True)
+check("ฟอร์มเข้าคิวของคนไข้มีช่องอาการเบื้องต้น (maxlength 500) และไม่มีปุ่ม 'เร่งด่วน'",
+      'name="symptom_note"' in home and 'maxlength="500"' in home and "เร่งด่วน" not in home)
+queue_1 = enqueue(1, "ปวดหัว มีไข้ 2 วัน")
+check("เข้าคิวแล้วยังไม่มีห้องแชท: คิว waiting พร้อมอาการเบื้องต้น, ไม่มีการจับคู่อัตโนมัติ",
+      latest(1)["symptom_note"] == "ปวดหัว มีไข้ 2 วัน" and open_chats() == {} and position(1) == 1)
+home = client.get("/pharmacist/1").get_data(as_text=True)
+check("หน้าเภสัชกรเห็นคิวรอรับเคส 1 รายการ: ชื่อ, อาการ, เวลาที่รอ, ปุ่มรับเคส",
+      "คิวรอรับเคส (1)" in home and "สมหญิง รักดี" in home and "ปวดหัว มีไข้ 2 วัน" in home
+      and 'class="elapsed"' in home and f"/pharmacist/1/queue/{queue_1}/claim" in home and ">รับเคส</button>" in home)
+r = claim(1, queue_1)
+chat_id = latest(1)["chat_id"]
+check("เภสัชกร 1 กดรับเคส: สร้างห้องแชท + คิว in_progress ใน Transaction เดียว แล้วเข้าห้องแชท",
+      r.status_code == 302 and r.location.endswith(f"/pharmacist/1/chat/{chat_id}") and latest(1)["queue"] == "in_progress"
+      and latest(1)["pharmacist_id"] == 1 and chat_state(chat_id) == "waiting_reply" and waiting_count() == 0, str(latest(1)))
 r = close(1, chat_id)
 check("ปิดห้องแชทก่อนตอบคนไข้ไม่ได้", "ยังไม่ได้ตอบคนไข้" in r.get_data(as_text=True) and latest(1)["chat"] == "open")
 client.post(f"/api/chat/{chat_id}/messages", json={"sender_type": "patient", "content": "ปวดหัว มีไข้ค่ะ"})
@@ -137,9 +227,35 @@ check("เภสัชกรตอบข้อความแรก -> 'ระ�
       and [m["sender_type"] for m in msgs["messages"]] == ["patient", "pharmacist"])
 page = client.get(f"/pharmacist/1/chat/{chat_id}").get_data(as_text=True)
 check("หน้าแชททั้งสองฝั่ง", "ออกใบสั่งยา" in page and client.get(f"/patient/1/chat/{chat_id}").status_code == 200)
-check("dropdown: ยาที่คงเหลือ 0 เลือกไม่ได้ (disabled) ยาอื่นเลือกได้",
-      '<option value="6" disabled>คลอร์เฟนิรามีน 4 mg (หมด)</option>' in page
-      and '<option value="1" >ยา A (พาราเซตามอล 500 mg) (เหลือ 20)</option>' in page)
+check("ฟอร์มใบสั่งยาใช้ช่องค้นหายา 3 แถว ไม่มี dropdown แล้ว",
+      page.count('class="drug-search relative"') == 3 and page.count('name="drug_id"') == 3
+      and "<select" not in page and "drugsearch.js" in page and "/api/pharmacist/1/drugs" in page)
+
+print("\n--- ช่องค้นหายา (API ที่ type-ahead เรียก) ---")
+status, drugs = search("พารา")
+check("พิมพ์ชื่อบางส่วน 'พารา' (กลางคำ) -> ยา A, แสดง รหัส · ชื่อยา · สต็อกคงเหลือ",
+      status == 200 and drugs == [{"drug_id": 1, "name": "ยา A (พาราเซตามอล 500 mg)", "stock": 20,
+                                   "label": "1 · ยา A (พาราเซตามอล 500 mg) · เหลือ 20"}], str(drugs))
+check("ไม่สนตัวพิมพ์ใหญ่เล็ก: 'MG' และ 'ors'", set(found("MG")[1]) == {1, 2, 3, 6} and found("ors")[1] == [5],
+      f"({found('MG')[1]}, {found('ors')[1]})")
+names = [d["name"] for d in search("MG")[1]]
+check("เรียงตามชื่อยา", names == [r["name"] for r in db.query(
+    "SELECT name FROM drug WHERE LOWER(name) LIKE '%mg%' ORDER BY name")], str(names))
+check("พิมพ์รหัส '3' (ขึ้นต้นด้วย) -> ยารหัส 3", found("3")[1] == [3], str(found("3")[1]))
+check("พิมพ์ '2' -> ยารหัส 2 และยาที่ชื่อมีเลข 2 (ยาธาตุน้ำขาว 200 มล.)", set(found("2")[1]) == {2, 4}, str(found("2")[1]))
+status, drugs = search("6")
+check("ยาที่คงเหลือ 0 แสดงเป็น 'หมด'", status == 200 and [d["label"] for d in drugs] == ["6 · คลอร์เฟนิรามีน 4 mg · หมด"], str(drugs))
+check("สต็อกในผลค้นหา = ผลรวมล็อตที่ยังไม่หมดอายุ (ลอราทาดีน 100 + 200)", search("ลอรา")[1][0]["stock"] == 300)
+for q in ["%", "_", "%%", "\\", "ยา%A", "ยา_A", "'", "' OR 1=1 --", "\"", ";"]:
+    check(f"พิมพ์ {q!r} -> ถือเป็นตัวอักษรธรรมดา ไม่มี error ไม่มีผลลัพธ์", found(q) == (200, []), str(found(q)))
+for q, label in [("", "ว่าง"), ("   ", "ช่องว่างล้วน"), (None, "ไม่ส่ง q")]:
+    check(f"พิมพ์{label} -> รายการว่าง", search(q) == (200, []), str(search(q)))
+check("คำค้นยาวมาก (300 ตัวอักษร) ไม่ error", found("ก" * 300) == (200, []))
+check("มีช่องว่างหน้าหลังคำค้น ก็ค้นได้", found("  พารา  ")[1] == [1])
+app_module.DRUG_SEARCH_LIMIT = 2
+check("จำกัดจำนวนผลลัพธ์ (ตั้งเป็น 2 เพื่อทดสอบ เพราะยามี 6 รายการ ค่าจริงคือ 10)", len(search("mg")[1]) == 2)
+app_module.DRUG_SEARCH_LIMIT = 10
+check("ค่าจริง: แสดงสูงสุด 10 รายการ", app_module.DRUG_SEARCH_LIMIT == 10 and len(search("mg")[1]) == 4)
 
 print("\n--- ฝั่งเภสัชกร : กันเฉพาะยาที่หมด และตรวจการกรอกฟอร์ม (ไม่เทียบจำนวนกับคงเหลือ) ---")
 rejected_prescription(1, chat_id, [(6, 1)], "คลอร์เฟนิรามีน 4 mg คงเหลือ 0 ออกใบสั่งยาไม่ได้", "ยาคงเหลือ 0 -> ปฏิเสธ")
@@ -148,7 +264,9 @@ rejected_prescription(1, chat_id, [(1, "2.5")], "จำนวนยาต้อ�
 rejected_prescription(1, chat_id, None, "กรุณากรอกขนาดยาและวิธีใช้ให้ครบทุกรายการที่เลือก", "ไม่กรอกขนาดยา/วิธีใช้ -> ปฏิเสธ",
                       form={"drug_id": "1", "strength": "", "dosage": "", "usage_note": "", "quantity": "2"})
 r = client.post(f"/pharmacist/1/chat/{chat_id}/prescription", data=rx_form([(1, 0)]))
-check("ฟอร์มคืนค่าที่กรอกไว้หลังถูกปฏิเสธ", 'value="0"' in r.get_data(as_text=True))
+html = r.get_data(as_text=True)
+check("ฟอร์มคืนค่าที่กรอกไว้หลังถูกปฏิเสธ รวมยาที่เลือกในช่องค้นหา", 'value="0"' in html
+      and 'name="drug_id" value="1"' in html and 'value="1 · ยา A (พาราเซตามอล 500 mg) · เหลือ 20"' in html)
 
 before = snapshot()
 rx_over = prescribe(1, chat_id, [(2, 5), (1, 25)],   # ลอราทาดีน 5, ยา A 25 (คงเหลือ 20)
@@ -163,30 +281,65 @@ check("เภสัชกรปิดห้องแชท -> chat closed, ค�
 r = client.post(f"/api/chat/{chat_id}/messages", json={"sender_type": "patient", "content": "ขอบคุณค่ะ"})
 check("ห้องปิดแล้วส่งข้อความไม่ได้", r.status_code == 409)
 
-print("\n--- ฝั่งคนไข้ : สั่งซื้อเกินสต็อก -> ปฏิเสธ + ROLLBACK ทั้งใบ ---")
+print("\n--- ฝั่งคนไข้ : กรอกข้อมูลผิด -> ไม่บันทึก rejected ---")
+before = snapshot()
+r = client.post(f"/patient/1/prescription/{rx_over}/order", data={"shipping_address": "   "})
+check("ที่อยู่ว่าง: แจ้งให้กรอก ไม่มีแถวใหม่", "กรุณาระบุที่อยู่จัดส่ง" in r.get_data(as_text=True) and snapshot() == before)
+r = client.post(f"/patient/1/prescription/{rx_over}/order", data={"shipping_address": "ก" * 501})
+check("ที่อยู่ยาวเกิน 500: แจ้งเตือน ไม่มีแถวใหม่", "ที่อยู่จัดส่งยาวเกิน 500 ตัวอักษร" in r.get_data(as_text=True) and snapshot() == before)
+for label, args in [("ไม่พบใบสั่งยา", (1, 9999, ADDRESS)), ("ใบสั่งยาของคนไข้คนอื่น", (2, rx_over, ADDRESS))]:
+    try:
+        tx.place_order(*args)
+        raised = None
+    except tx.DemoError as exc:
+        raised = exc
+    check(f"{label}: DemoError ธรรมดา (ไม่ใช่ RejectedError) ไม่มีแถวใหม่", raised is not None
+          and not isinstance(raised, tx.RejectedError) and "ไม่พบใบสั่งยานี้" in str(raised) and snapshot() == before, str(raised))
+
+print("\n--- ฝั่งคนไข้ : สั่งซื้อเกินสต็อก -> ROLLBACK ทั้งใบ + เหลือแถว rejected ---")
 # บรรทัดที่ 1 (ลอราทาดีน 5) ถูกหักสต็อกไปก่อน แล้วบรรทัดที่ 2 (ยา A 25) ไม่พอ -> ต้องคืนลอราทาดีนด้วย
-rejected_order(1, rx_over, "ยา A (พาราเซตามอล 500 mg) คงเหลือ 20 สั่ง 25 ไม่ได้", "ลอราทาดีน 5 + ยา A 25")
+rej_1 = rejected_order(1, rx_over, "ยา A (พาราเซตามอล 500 mg) คงเหลือ 20 สั่ง 25 ไม่ได้", "ลอราทาดีน 5 + ยา A 25")
 check("ลอราทาดีนเท่าเดิม (100, 200) และยา A เท่าเดิม (20)", (stock(2), stock(3), stock(1)) == (100, 200, 20),
       f"(จริง {stock(2)}, {stock(3)}, {stock(1)})")
+page = client.get("/patient/1/orders").get_data(as_text=True)
+check("ประวัติคำสั่งซื้อ: แถว rejected ขึ้นป้าย 'ถูกปฏิเสธ' ไม่มีปุ่มชำระเงิน/ใบเสร็จ มีลิงก์กลับไปใบสั่งยา",
+      "ถูกปฏิเสธ" in page and "แสดงทั้งหมด <strong>1</strong> คำสั่งซื้อ" in page and f"/order/{rej_1}/pay" not in page
+      and f"/order/{rej_1}/receipt" not in page and f"/patient/1/prescription/{rx_over}" in page)
+page = client.get(f"/patient/1/prescription/{rx_over}").get_data(as_text=True)
+check("หน้าใบสั่งยา: ยังสั่งซื้อได้ (rejected ไม่กินสิทธิ์ใบสั่งยา) และบอกว่าเคยถูกปฏิเสธ 1 ครั้ง",
+      'id="order-form"' in page and "เคยถูกปฏิเสธตอนสั่งซื้อ 1 ครั้ง" in page and "สั่งซื้อแล้ว" not in page)
+home = client.get("/patient/1").get_data(as_text=True)
+check("หน้าหลักคนไข้: ใบสั่งยาที่ถูกปฏิเสธไม่ขึ้น 'รอชำระเงิน'", "ถูกปฏิเสธ · สั่งซื้อใหม่ได้" in home and "รอชำระเงิน" not in home)
+r = client.get(f"/patient/1/order/{rej_1}/pay")
+check("หน้าชำระเงินของคำสั่งซื้อ rejected: ส่งกลับหน้าประวัติ (ไม่วนลูป)", r.status_code == 302 and r.location.endswith("/patient/1/orders"))
+r = client.get(f"/patient/1/order/{rej_1}/receipt", follow_redirects=True)
+check("หน้าใบเสร็จของคำสั่งซื้อ rejected: จบที่หน้าประวัติ", r.status_code == 200 and "ประวัติคำสั่งซื้อ" in r.get_data(as_text=True))
+before = snapshot()
+r = client.post(f"/patient/1/order/{rej_1}/pay", data={"method": "qr_code"}, follow_redirects=True)
+check("ชำระเงินคำสั่งซื้อ rejected ไม่ได้: ไม่มี payment/receipt ใหม่ สถานะยังเป็น rejected", snapshot() == before
+      and scalar("SELECT status FROM orders WHERE order_id = :o", o=rej_1) == "rejected")
+try:
+    tx.pay_order(1, rej_1, "qr_code")
+    raised = ""
+except tx.DemoError as exc:
+    raised = str(exc)
+check("pay_order ปฏิเสธคำสั่งซื้อ rejected ด้วยข้อความที่ถูกต้อง", raised == "คำสั่งซื้อนี้ถูกปฏิเสธ ชำระเงินไม่ได้", raised)
 
-print("\n--- ทำต่อให้สำเร็จ : คนไข้ 1 ขอรับคำปรึกษาใหม่ ---")
-chat_id = request(1, 2)                              # เภสัชกร 2 ยังไม่เคยได้ห้อง
-reply(2, chat_id)
-rx_id = prescribe(2, chat_id, [(2, 10), (1, 2)])     # ลอราทาดีน 10, ยา A 2
-close(2, chat_id)
-
+print("\n--- เดโมสั่งซื้อปกติ (สต็อกพอ) : คนไข้ 1 ขอรับคำปรึกษาใหม่ เภสัชกร 2 รับเคส ---")
+rx_id = consult(1, 2, [(2, 10), (1, 2)])             # ลอราทาดีน 10, ยา A 2
 check("หน้าใบสั่งยา", client.get(f"/patient/1/prescription/{rx_id}").status_code == 200)
 r = client.post(f"/patient/1/prescription/{rx_id}/order", data={"shipping_address": "12/3 หมู่ 4 ขอนแก่น 40000"})
 order = db.query_one("SELECT order_id, status FROM orders WHERE prescription_id = :r", r=rx_id)
 check("สั่งซื้อ: orders = pending_payment", r.status_code == 302 and order and order["status"] == "pending_payment", str(order))
 oid = order["order_id"]
+check("สั่งซื้อสำเร็จแล้วไปหน้าชำระเงิน", r.location.endswith(f"/patient/1/order/{oid}/pay"))
 details = db.query("SELECT line_no, drug_name, quantity, unit_price FROM order_detail WHERE order_id = :o ORDER BY line_no", o=oid)
 check("order_detail snapshot ชื่อ/ราคา", [(d["drug_name"], d["quantity"], d["unit_price"]) for d in details]
       == [("ลอราทาดีน 10 mg", 10, 5), ("ยา A (พาราเซตามอล 500 mg)", 2, 2)], str(details))
 check("ตัดสต็อก: ยา A = 18", stock(1) == 18, f"(จริง {stock(1)})")
 check("FEFO: ลอราทาดีนตัดล็อตหมดอายุก่อน (100->90) ล็อตหลังคงเดิม (200)", stock(2) == 90 and stock(3) == 200, f"(จริง {stock(2)}, {stock(3)})")
 batches = [r_["batch_id"] for r_ in db.query("SELECT batch_id FROM prescription_detail WHERE prescription_id = :r ORDER BY line_no", r=rx_id)]
-check("prescription_detail.batch_id ถูกบันทึก", batches == [2, 1], str(batches))
+check("prescription_detail.batch_id ถูกบันทึก (ผูกล็อต)", batches == [2, 1], str(batches))
 
 check("หน้าชำระเงิน", client.get(f"/patient/1/order/{oid}/pay").status_code == 200)
 r = client.post(f"/patient/1/order/{oid}/pay", data={"method": "qr_code"})
@@ -198,97 +351,219 @@ check("receipt + receipt_detail", rc is not None and rc["n"] == 2 and rc["total"
 page = client.get(f"/patient/1/order/{oid}/receipt")
 check("หน้าใบเสร็จแสดงเลขที่ใบเสร็จ", page.status_code == 200 and rc["receipt_no"] in page.get_data(as_text=True))
 page = client.get("/patient/1/orders").get_data(as_text=True)
-check("ประวัติคำสั่งซื้อแสดงสถานะชำระเงินแล้ว", "ชำระเงินแล้ว" in page and rc["receipt_no"] in page)
+check("ประวัติคำสั่งซื้อ: มีทั้งแถว 'ชำระเงินแล้ว' (พร้อมใบเสร็จ) และแถว 'ถูกปฏิเสธ'",
+      "ชำระเงินแล้ว" in page and rc["receipt_no"] in page and "ถูกปฏิเสธ" in page and "แสดงทั้งหมด <strong>2</strong> คำสั่งซื้อ" in page)
 before = snapshot()
 r = client.post(f"/patient/1/order/{oid}/pay", data={"method": "bank_transfer", "bank_name": "ธนาคารตัวอย่าง ก"})
 check("จ่ายซ้ำถูกปฏิเสธ ข้อมูลไม่เปลี่ยน", "ชำระเงินแล้ว" in r.get_data(as_text=True) and snapshot() == before)
 
-print("\n=== รอบที่ 2 : สต็อกลดลงหลังออกใบสั่งยา และยาหลายล็อต (ปฏิเสธตอนสั่งซื้อ) ===")
-# ยา A เหลือ 18 : ออกใบสั่งยา 2 ใบ ใบละ 10 แล้วคนแรกสั่งซื้อก่อน
-chat2 = request(2, 1)                               # ทั้งคู่ว่าง เภสัชกร 1 ได้ห้องล่าสุดนานกว่า
-reply(1, chat2)
-rx2 = prescribe(1, chat2, [(1, 10)])
-close(1, chat2)
-chat3 = request(3, 2)                               # ทั้งคู่ว่าง เภสัชกร 2 ได้ห้องล่าสุดนานกว่า
-reply(2, chat3)
-rx3 = prescribe(2, chat3, [(2, 5), (1, 10)])        # ลอราทาดีน 5 + ยา A 10
-close(2, chat3)
-r = client.post(f"/patient/2/prescription/{rx2}/order", data={"shipping_address": "88/9 อุดรธานี 41000"})
-oid2 = scalar("SELECT MAX(order_id) FROM orders WHERE prescription_id = :r", r=rx2)
-check("คนไข้ 2 สั่งซื้อก่อน: ยา A = 8", r.status_code == 302 and stock(1) == 8, f"(จริง {stock(1)})")
-rejected_order(3, rx3, "ยา A (พาราเซตามอล 500 mg) คงเหลือ 8 สั่ง 10 ไม่ได้", "คนไข้ 3 สั่งซื้อทีหลัง")
+print("\n=== รอบที่ 2 : เดโมกรณีปฏิเสธ (สต็อก 3 สั่ง 5) แล้วเติมสต็อกและสั่งซ้ำจากใบสั่งยาเดิม ===")
+rx2 = consult(2, 1, [(1, 5)])                        # ยา A 5
+execute("UPDATE drug_batch SET quantity = 3 WHERE batch_id = 1")
+rej_2 = rejected_order(2, rx2, "ยา A (พาราเซตามอล 500 mg) คงเหลือ 3 สั่ง 5 ไม่ได้", "สต็อก 3 สั่ง 5")
+rows = db.query("SELECT order_id, status FROM orders WHERE prescription_id = :r", r=rx2)
+check("orders ของใบสั่งยานี้มีแถว status = 'rejected' 1 แถว", rows == [{"order_id": rej_2, "status": "rejected"}], str(rows))
+check("order_detail ไม่มีแถวของคำสั่งนี้", scalar("SELECT COUNT(*) FROM order_detail WHERE order_id = :o", o=rej_2) == 0)
+check("drug_batch.quantity ยังเท่าเดิม (3)", stock(1) == 3, f"(จริง {stock(1)})")
 
-# ลอราทาดีนเหลือ 90 + 200 = 290 : สั่ง 250 ยอดรวมพอ แต่จ่ายจากล็อตเดียวต่อรายการ และไม่มีล็อตใดมีถึง 250
-chat4 = request(2, 1)
-reply(1, chat4)
-rx4 = prescribe(1, chat4, [(2, 250)])
-close(1, chat4)
-rejected_order(2, rx4, "ลอราทาดีน 10 mg คงเหลือรวม 290 แต่ไม่มีล็อตเดียวที่มีจำนวนพอสำหรับ 250 (ล็อตที่มากที่สุดมี 200)",
-               "ยาหลายล็อต ยอดรวมพอแต่ล็อตเดียวไม่พอ")
+execute("UPDATE drug_batch SET quantity = 18 WHERE batch_id = 1")        # เติมสต็อกให้พอ
+r = client.post(f"/patient/2/prescription/{rx2}/order", data={"shipping_address": "88/9 อุดรธานี 41000"})
+rows = db.query("SELECT order_id, status FROM orders WHERE prescription_id = :r ORDER BY order_id", r=rx2)
+oid2 = rows[-1]["order_id"]
+check("เติมสต็อกแล้วสั่งซ้ำจากใบสั่งยาเดิมสำเร็จ (unique แบบมีเงื่อนไขทำงาน): rejected 1 + pending_payment 1",
+      r.status_code == 302 and [x["status"] for x in rows] == ["rejected", "pending_payment"], str(rows))
+check("คำสั่งซื้อใหม่ตัดสต็อกตามปกติ: ยา A 18 -> 13, มี order_detail และผูกล็อต", stock(1) == 13
+      and scalar("SELECT COUNT(*) FROM order_detail WHERE order_id = :o", o=oid2) == 1
+      and scalar("SELECT batch_id FROM prescription_detail WHERE prescription_id = :r", r=rx2) == 1, f"(ยา A จริง {stock(1)})")
+before = snapshot()
+r = client.post(f"/patient/2/prescription/{rx2}/order", data={"shipping_address": "88/9 อุดรธานี 41000"})
+html = r.get_data(as_text=True)
+check("สั่งซ้ำอีกครั้งหลังสำเร็จ: 'ถูกสั่งซื้อไปแล้ว' ไม่บันทึก rejected เพิ่ม", r.status_code == 200 and snapshot() == before
+      and (f"คำสั่งซื้อเลขที่ {oid2}" in html) and 'id="order-form"' not in html)
+try:
+    tx.place_order(2, rx2, ADDRESS)
+    raised = None
+except tx.DemoError as exc:
+    raised = exc
+check("place_order ขั้น (1): ใบสั่งยาที่มีคำสั่งซื้อจริงแล้ว -> DemoError ธรรมดา ไม่มีแถวใหม่", raised is not None
+      and not isinstance(raised, tx.RejectedError) and str(raised) == "ใบสั่งยานี้ถูกสั่งซื้อไปแล้ว" and snapshot() == before, str(raised))
+with db.connect() as conn:                           # พิสูจน์ unique index โดยตรง แล้ว ROLLBACK
+    cur = conn.cursor()
+    insert = ("INSERT INTO orders (order_id, patient_id, prescription_id, status, shipping_address) "
+              "VALUES (seq_orders.NEXTVAL, 2, :r, :s, 'x')")
+    try:
+        cur.execute(insert, r=rx2, s="pending_payment")
+        code = None
+    except oracledb.IntegrityError as exc:
+        code = exc.args[0].full_code
+    cur.execute(insert, r=rx2, s="rejected")
+    conn.rollback()
+check("unique index: คำสั่งซื้อจริงใบที่ 2 ของใบสั่งยาเดียวกันถูกกัน (ORA-00001) แต่แถว rejected เพิ่มได้", code == "ORA-00001", str(code))
 r = client.post(f"/patient/2/order/{oid2}/pay", data={"method": "bank_transfer", "bank_name": "ธนาคารตัวอย่าง ก"})
 slip = db.query_one("SELECT s.transaction_no, s.payer_name, s.payee_name, s.amount FROM transfer_slip s JOIN payment y ON y.payment_id = s.payment_id WHERE y.order_id = :o", o=oid2)
-check("ชำระด้วยการโอน: payment + transfer_slip", r.status_code == 302 and slip is not None and slip["amount"] == 20, str(slip))
+check("ชำระด้วยการโอน: payment + transfer_slip", r.status_code == 302 and slip is not None and slip["amount"] == 10, str(slip))
+check("มี payment เฉพาะคำสั่งซื้อจริง ไม่มีของแถว rejected", scalar(
+    "SELECT COUNT(*) FROM payment y JOIN orders o ON o.order_id = y.order_id WHERE o.status = 'rejected'") == 0)
 
-print("\n=== รอบที่ 3 : คิวรอจริง, VIP แซงคิว, จับคู่ต่อเมื่อห้องว่าง ===")
-check(f"เภสัชกรถือห้องเปิดได้คนละ {tx.MAX_OPEN_CHATS} ห้อง และตอนนี้ไม่มีห้องเปิด", tx.MAX_OPEN_CHATS == 1 and open_chats() == {})
-chat_a = request(1, 2)                              # ทั้งคู่ว่าง เภสัชกร 2 ได้ห้องล่าสุดนานกว่า
-chat_b = request(2, 1)                              # เหลือเภสัชกร 1 คนเดียวที่ว่าง
-check("เภสัชกรเต็มทั้ง 2 คน", open_chats() == {1: 1, 2: 1}, str(open_chats()))
+print("\n--- ยาหลายล็อต : ยอดรวมพอแต่ล็อตเดียวไม่พอ ---")
+# ลอราทาดีนเหลือ 90 + 200 = 290 : สั่ง 250 ยอดรวมพอ แต่จ่ายจากล็อตเดียวต่อรายการ และไม่มีล็อตใดมีถึง 250
+rx3 = consult(3, 2, [(2, 250)])
+rejected_order(3, rx3, "ลอราทาดีน 10 mg คงเหลือรวม 290 แต่ไม่มีล็อตเดียวที่มีจำนวนพอสำหรับ 250 (ล็อตที่มากที่สุดมี 200)",
+               "ยาหลายล็อต ยอดรวมพอแต่ล็อตเดียวไม่พอ")
+rejected_order(3, rx3, "ลอราทาดีน 10 mg คงเหลือรวม 290 แต่ไม่มีล็อตเดียวที่มีจำนวนพอสำหรับ 250 (ล็อตที่มากที่สุดมี 200)",
+               "กดสั่งซ้ำทั้งที่สต็อกยังไม่พอ (rejected แถวที่ 2 ของใบสั่งยาเดิม)")
+check("ใบสั่งยาเดียวมีแถว rejected ได้หลายแถว", scalar(
+    "SELECT COUNT(*) FROM orders WHERE prescription_id = :r AND status = 'rejected'", r=rx3) == 2)
 
-r = client.post("/patient/3/queue")                 # คนไข้ 3 (ทั่วไป) ต้องรอ
-info = latest(3)
-check("คนไข้ 3: ทุกคนเต็ม -> คิว waiting (รอจับคู่) ไม่สร้างห้อง", r.status_code == 302 and info["queue"] == "waiting" and info["chat_id"] is None, str(info))
-home = client.get("/patient/3").get_data(as_text=True)
-check("หน้าคนไข้ 3 แสดง 'รอจับคู่' ลำดับที่ 1 (รอทั้งหมด 1 คิว)", "รอจับคู่" in home and "ลำดับที่ 1 ในคิว" in home
-      and "รอจับคู่ทั้งหมด 1 คิว" in home and position(3) == 1)
+print("\n=== รอบที่ 3 : คิวรอรับเคส, VIP ขึ้นก่อน, รับเคสพร้อมกัน, เภสัชกรคนเดียวหลายห้อง ===")
+check("เริ่มรอบ: ไม่มีห้องเปิดและไม่มีคิวรอ", open_chats() == {} and waiting_count() == 0)
+before = snapshot()
+r = client.post("/patient/1/queue", data={"symptom_note": "ก" * 501})
+html = r.get_data(as_text=True)
+check("อาการเบื้องต้นยาวเกิน 500: เซิร์ฟเวอร์ปฏิเสธ ไม่สร้างคิว และคืนข้อความที่พิมพ์ไว้", r.status_code == 200
+      and "อาการเบื้องต้นยาวเกิน 500 ตัวอักษร" in html and "ก" * 501 in html and snapshot() == before)
 
-r = client.post("/patient/4/queue")                 # คนไข้ 4 (VIP) มาทีหลัง
-info = latest(4)
-check("คนไข้ 4 (VIP): รอจับคู่เช่นกัน", info["queue"] == "waiting" and info["chat_id"] is None
-      and scalar("SELECT member_type FROM consult_queue WHERE patient_id = 4") == "vip", str(info))
-check("VIP แซงคิว: คนไข้ 4 ลำดับที่ 1, คนไข้ 3 ถูกเลื่อนเป็นลำดับที่ 2 (ค่าจาก polling)", position(4) == 1 and position(3) == 2,
-      f"(VIP={position(4)}, ทั่วไป={position(3)})")
-home = client.get("/patient/3").get_data(as_text=True)
-check("หน้าคนไข้ 3 อัปเดตเป็นลำดับที่ 2 (รอทั้งหมด 2 คิว)", "ลำดับที่ 2 ในคิว" in home and "รอจับคู่ทั้งหมด 2 คิว" in home)
-check("คนไข้ที่มีคิวค้างขอซ้ำไม่ได้", "มีคิวที่ยังไม่เสร็จ" in client.post("/patient/3/queue").get_data(as_text=True))
+LONG_NOTE = ("ไอ เจ็บคอ มีน้ำมูก " * 30)[:499] + "จ"      # 500 ตัวอักษรพอดี
+NOTES = {1: "ปวดท้อง ท้องเสียตั้งแต่เมื่อคืน", 2: LONG_NOTE, 4: "น้ำตาลสูง เวียนหัว"}
+check("อาการเบื้องต้นของคนไข้ 2 ยาว 500 ตัวอักษรพอดี (ภาษาไทย)", len(NOTES[2]) == 500, str(len(NOTES[2])))
+barrier = threading.Barrier(3)
+codes = {}
+
+
+def enqueue_together(pid):
+    c = app.test_client()
+    barrier.wait()
+    codes[pid] = c.post(f"/patient/{pid}/queue", data={"symptom_note": NOTES[pid]}).status_code
+
+
+threads = [threading.Thread(target=enqueue_together, args=(pid,)) for pid in NOTES]
+[t.start() for t in threads]; [t.join() for t in threads]
+queues = {pid: latest(pid) for pid in NOTES}
+check("คนไข้ 3 คน (คนไข้ 4 เป็น VIP) เข้าคิวพร้อมกัน: ได้คิว waiting ครบ 3 ยังไม่มีห้องแชท", set(codes.values()) == {302}
+      and waiting_count() == 3 and all(q["queue"] == "waiting" and q["chat_id"] is None for q in queues.values())
+      and open_chats() == {}, str(codes))
+check("อาการเบื้องต้น 500 ตัวอักษรภาษาไทยบันทึกได้ครบ", queues[2]["symptom_note"] == NOTES[2]
+      and scalar("SELECT member_type FROM consult_queue WHERE queue_id = :q", q=queues[4]["queue_id"]) == "vip")
+queue_nos = [r_["queue_no"] for r_ in db.query("SELECT queue_no FROM consult_queue WHERE status = 'waiting' ORDER BY queue_id")]
+print(f"       (ข้อมูล: queue_no ของ 3 คิวที่เข้าพร้อมกัน = {queue_nos})")
+check("ลำดับคิว: VIP (คนไข้ 4) ลำดับที่ 1 อีก 2 คนเป็นลำดับที่ 2 และ 3 ตามเวลาที่เข้าคิว",
+      position(4) == 1 and {position(1), position(2)} == {2, 3}, f"(VIP={position(4)}, {position(1)}, {position(2)})")
 home = client.get("/pharmacist/1").get_data(as_text=True)
-check("หน้าเภสัชกร: รายการห้องรอตอบกลับ + ตัวนับเวลา ไม่มีปุ่มรับคิว",
-      'class="countdown' in home and "รับคิว" not in home and "ห้องแชทที่รอตอบกลับ (1)" in home)
+table = home[home.index("คิวรอรับเคส (3)"):home.index("ห้องแชทที่รอตอบกลับ")] if "คิวรอรับเคส (3)" in home else ""
+order_in_page = sorted(["วีระ ทองดี", "สมหญิง รักดี", "ธนากร มั่นคง"], key=lambda name: table.find(name))
+expected_order = [r_["name"] for r_ in db.query("""
+    SELECT p.first_name || ' ' || p.last_name AS name FROM consult_queue q JOIN patient p ON p.patient_id = q.patient_id
+    WHERE  q.status = 'waiting' ORDER BY CASE q.member_type WHEN 'vip' THEN 0 ELSE 1 END, q.entered_at, q.queue_id""")]
+check("หน้าเภสัชกรเห็นครบ 3 รายการ VIP ขึ้นก่อน แล้วตามเวลาที่เข้าคิว", table.count(">รับเคส</button>") == 3
+      and order_in_page == expected_order and expected_order[0] == "วีระ ทองดี" and table.count(">VIP</span>") == 1
+      and table.count('class="elapsed"') == 3, str(order_in_page))
+check("อาการเบื้องต้นที่ยาวถูกตัดด้วย … (ข้อความเต็มอยู่ใน title) อาการสั้นแสดงเต็ม",
+      f">{NOTES[2][:59]}…</span>" in table and f">{NOTES[2]}<" not in table and f'title="{NOTES[2]}"' in table
+      and f">{NOTES[1]}</span>" in table and f">{NOTES[4]}</span>" in table)
+state = client.get("/api/pharmacist/2/state").get_json()["state"]
+check("polling ของหน้าเภสัชกรมีรายการคิวที่รอ (หน้า reload เมื่อรายการเปลี่ยน)", len(state[0]) == 3
+      and state[0][0] == queues[4]["queue_id"], str(state[0]))
 
-reply(2, chat_a)
-r = close(2, chat_a)                                # เภสัชกร 2 ปิดห้อง -> คิวถัดไป (VIP) ได้ห้องอัตโนมัติ
-info4, info3 = latest(4), latest(3)
-check("ปิดห้อง -> VIP (คนไข้ 4) ได้ห้องกับเภสัชกร 2 อัตโนมัติ ใน Transaction เดียวกัน", r.status_code == 302
-      and info4["queue"] == "in_progress" and info4["pharmacist_id"] == 2 and info4["chat"] == "open"
-      and chat_state(info4["chat_id"]) == "waiting_reply", str(info4))
-check("คนไข้ 3 ยังรอ และเลื่อนขึ้นเป็นลำดับที่ 1", info3["queue"] == "waiting" and position(3) == 1)
-left = client.get(f"/api/chat/{info4['chat_id']}/messages").get_json()["seconds_left"]
-check("ตัวนับ 10 นาทีของห้องใหม่เริ่มตอนจับคู่", 590 <= left <= 600, f"(เหลือ {left} วินาที)")
-check("ไม่มีเภสัชกรถือเกิน 1 ห้อง", open_chats() == {1: 1, 2: 1}, str(open_chats()))
+vip_queue = queues[4]["queue_id"]
+barrier = threading.Barrier(2)
+responses = {}
 
-check("ยังไม่ครบ 10 นาที: ระบบไม่ปิดห้องเอง", chat_state(chat_b) == "waiting_reply")
-r = client.post(f"/pharmacist/1/chat/{chat_b}/expire")      # ปุ่มทดสอบ: เภสัชกร 1 ไม่ตอบคนไข้ 2
-info2, info3 = latest(2), latest(3)
-check("หมดเวลา -> 'ให้คำปรึกษาไม่สำเร็จ' (chat closed, คิว cancelled)", r.status_code == 302 and info2["chat"] == "closed"
-      and info2["queue"] == "cancelled" and chat_state(chat_b) == "failed", str(info2))
-check("หมดเวลา -> คนไข้ 3 ที่รออยู่ได้ห้องกับเภสัชกร 1 อัตโนมัติ", info3["queue"] == "in_progress" and info3["pharmacist_id"] == 1
-      and info3["chat"] == "open", str(info3))
-check("ไม่มีคิวรอจับคู่เหลือ", scalar("SELECT COUNT(*) FROM consult_queue WHERE status = 'waiting'") == 0)
-check("หน้าคนไข้ 2 แจ้งว่าไม่สำเร็จและขอใหม่ได้", "ให้คำปรึกษาไม่สำเร็จ" in client.get("/patient/2").get_data(as_text=True))
 
-# หมดเวลาจริง + จับคู่ต่อ : คนไข้ 2 ขอใหม่ (ต้องรอ) แล้วย้อนเวลาเริ่มห้องของคนไข้ 3 ไป 11 นาที ให้ polling ทำงาน
-client.post("/patient/2/queue")
-check("คนไข้ 2 ขอใหม่: เต็มทุกคน -> รอจับคู่ ลำดับที่ 1", latest(2)["queue"] == "waiting" and position(2) == 1)
-with db.connect() as conn:
-    conn.cursor().execute("UPDATE chat_room SET started_at = started_at - INTERVAL '11' MINUTE WHERE chat_id = :c", c=info3["chat_id"])
-    conn.commit()
-client.get("/api/pharmacist/1/state")
+def claim_together(phid):
+    c = app.test_client()
+    barrier.wait()
+    responses[phid] = claim(phid, vip_queue, c)
+
+
+threads = [threading.Thread(target=claim_together, args=(phid,)) for phid in (1, 2)]
+[t.start() for t in threads]; [t.join() for t in threads]
+winners = [phid for phid, r_ in responses.items() if r_.status_code == 302]
+losers = [phid for phid, r_ in responses.items() if r_.status_code == 200]
+rooms = db.query("SELECT chat_id, pharmacist_id FROM chat_room WHERE queue_id = :q", q=vip_queue)
+check("เภสัชกร 2 คนกดรับเคสเดียวกันพร้อมกัน: ได้ห้องแชทเดียว (uq_chat_queue) คิว in_progress",
+      len(winners) == 1 and len(losers) == 1 and len(rooms) == 1 and rooms[0]["pharmacist_id"] == winners[0]
+      and latest(4)["queue"] == "in_progress", f"(สถานะ {[(p, r_.status_code) for p, r_ in responses.items()]}, ห้อง {rooms})")
+W, L = winners[0], losers[0]
+html = responses[L].get_data(as_text=True)
+check("อีกคนเห็น 'เคสนี้มีเภสัชกรท่านอื่นรับไปแล้ว' บนหน้ารายการคิวล่าสุด (เหลือ 2) ไม่ใช่หน้าพัง",
+      "ระบบปฏิเสธรายการ:" in html and "เคสนี้มีเภสัชกรท่านอื่นรับไปแล้ว" in html and "คิวรอรับเคส (2)" in html
+      and "วีระ ทองดี" not in html[html.index("คิวรอรับเคส (2)"):html.index("ห้องแชทที่รอตอบกลับ")] and "ORA-" not in html)
+before = snapshot()
+r = claim(L, vip_queue)
+check("กดรับเคสที่ถูกรับไปแล้วซ้ำ (หน้าเก่าค้าง): ข้อความเดิม ไม่มีแถวใหม่", r.status_code == 200
+      and "เคสนี้มีเภสัชกรท่านอื่นรับไปแล้ว" in r.get_data(as_text=True) and snapshot() == before)
+r = claim(L, 99999)
+check("รับคิวที่ไม่มีอยู่จริง: แสดงข้อความปฏิเสธ ไม่ใช่หน้าพัง ไม่มีแถวใหม่", r.status_code == 200
+      and "ระบบปฏิเสธรายการ:" in r.get_data(as_text=True) and snapshot() == before)
+check("VIP ได้ห้องแล้ว คนที่เหลือเลื่อนเป็นลำดับที่ 1 และ 2", position(4) is None and {position(1), position(2)} == {1, 2})
+room_v = rooms[0]["chat_id"]
+left = client.get(f"/api/chat/{room_v}/messages").get_json()["seconds_left"]
+check("ตัวนับ 10 นาทีของเภสัชกรเริ่มตอนรับเคส", 590 <= left <= 600, f"(เหลือ {left} วินาที)")
+
+r = claim(W, queues[1]["queue_id"])                  # เภสัชกรคนเดิมรับเคสที่ 2
+room_1 = latest(1)["chat_id"]
+check(f"เภสัชกร {W} รับเคสที่ 2 ได้ทั้งที่ยังมีห้องเปิดอยู่: ถือ 2 ห้องพร้อมกัน", r.status_code == 302
+      and open_chats() == {W: 2} and latest(1)["pharmacist_id"] == W, str(open_chats()))
+api = client.get(f"/api/pharmacist/{W}/rooms").get_json()
+check("API รายการห้องที่เปิดอยู่: 2 ห้อง + จำนวนคิวที่ยังรอ 1", [x["chat_id"] for x in api["rooms"]] == [room_v, room_1]
+      and api["waiting"] == 1 and all(x["last_patient_message_id"] == 0 for x in api["rooms"]), str(api))
+page = client.get(f"/pharmacist/{W}/chat/{room_v}").get_data(as_text=True)
+check("หน้าแชทเภสัชกรมีรายการห้องที่เปิดอยู่ให้สลับ (ห้องปัจจุบันไฮไลต์) และลิงก์กลับคิวรอรับเคส",
+      'id="room-tabs"' in page and f'class="room-tab active" href="/pharmacist/{W}/chat/{room_v}"' in page
+      and f'class="room-tab " href="/pharmacist/{W}/chat/{room_1}"' in page and "rooms.js" in page
+      and f"ห้อง #{room_1} · สมหญิง รักดี" in page and "คิวรอรับเคส" in page)
+
+
+def say(chat_id, sender, text):
+    return client.post(f"/api/chat/{chat_id}/messages", json={"sender_type": sender, "content": text})
+
+
+def texts(chat_id):
+    return [(m["sender_type"], m["content"]) for m in client.get(f"/api/chat/{chat_id}/messages?after=0").get_json()["messages"]]
+
+
+say(room_1, "patient", "ปวดท้องมากค่ะ")              # เภสัชกรอยู่ห้อง VIP คนไข้ห้องอื่นส่งข้อความเข้ามา
+api = {x["chat_id"]: x for x in client.get(f"/api/pharmacist/{W}/rooms").get_json()["rooms"]}
+check("มีข้อความใหม่ในห้องอื่น: API แจ้ง message_id ล่าสุดของคนไข้ในห้องนั้น (rooms.js ติดป้าย 'ข้อความใหม่')",
+      api[room_1]["last_patient_message_id"] > 0 and api[room_1]["turn"] == "pharmacist"
+      and api[room_v]["last_patient_message_id"] == 0, str(api))
+r1 = say(room_v, "pharmacist", "สวัสดีครับคุณวีระ")
+r2 = say(room_1, "pharmacist", "ปวดมากี่ชั่วโมงแล้วครับ")
+say(room_v, "patient", "น้ำตาล 250 ครับ")
+r3 = say(room_v, "pharmacist", "ทานยาเบาหวานตามปกติไหมครับ")
+r4 = say(room_1, "pharmacist", "ดื่มเกลือแร่ก่อนนะครับ")
+check("เภสัชกรคนเดียวตอบสลับ 2 ห้องได้ ข้อความลงถูกห้อง", {r1.status_code, r2.status_code, r3.status_code, r4.status_code} == {200}
+      and texts(room_v) == [("pharmacist", "สวัสดีครับคุณวีระ"), ("patient", "น้ำตาล 250 ครับ"), ("pharmacist", "ทานยาเบาหวานตามปกติไหมครับ")]
+      and texts(room_1) == [("patient", "ปวดท้องมากค่ะ"), ("pharmacist", "ปวดมากี่ชั่วโมงแล้วครับ"), ("pharmacist", "ดื่มเกลือแร่ก่อนนะครับ")]
+      and chat_state(room_v) == "consulting" and chat_state(room_1) == "consulting")
+rx_v = prescribe(W, room_v, [(5, 2)], "ออกใบสั่งยาในห้องหนึ่งขณะอีกห้องยังเปิดอยู่")
+r = close(W, room_v)
+check("ปิดห้องหนึ่ง อีกห้องยังเปิดอยู่ และไม่มีการจับคู่คิวอัตโนมัติ (คนไข้ 2 ยังรอ)", r.status_code == 302
+      and open_chats() == {W: 1} and latest(2)["queue"] == "waiting" and position(2) == 1, str(open_chats()))
+check("คนไข้ที่มีคิวค้างขอซ้ำไม่ได้", "มีคิวที่ยังไม่เสร็จ" in client.post("/patient/2/queue", data={"symptom_note": ""}).get_data(as_text=True))
+home = client.get("/patient/2").get_data(as_text=True)
+check("หน้าคนไข้ 2 ที่รออยู่: 'รอเภสัชกรรับเคส' ลำดับที่ 1 พร้อมอาการที่แจ้งไว้", "รอเภสัชกรรับเคส" in home
+      and "ลำดับที่ 1 ในคิว" in home and "รอรับเคสทั้งหมด 1 คิว" in home and NOTES[2] in home)
+
+r = claim(L, queues[2]["queue_id"])                  # เภสัชกรอีกคนรับคิวสุดท้าย
+room_2 = latest(2)["chat_id"]
+check(f"เภสัชกร {L} รับคิวที่เหลือ: ไม่มีคิวรอแล้ว", r.status_code == 302 and waiting_count() == 0
+      and open_chats() == {W: 1, L: 1}, str(open_chats()))
+home = client.get(f"/pharmacist/{L}").get_data(as_text=True)
+check("หน้ารายการของเภสัชกร: ห้องที่รับไว้รอตอบกลับพร้อมตัวนับเวลา, คิวรอรับเคสว่าง",
+      'class="countdown' in home and "ห้องแชทที่รอตอบกลับ (1)" in home and "คิวรอรับเคส (0)" in home
+      and "ไม่มีคิวที่รอรับเคส" in home)
+
+check("ยังไม่ครบ 10 นาที: ระบบไม่ปิดห้องเอง", chat_state(room_2) == "waiting_reply")
+r = client.post(f"/pharmacist/{L}/chat/{room_2}/expire")    # ปุ่มทดสอบ: เภสัชกรไม่ตอบคนไข้ 2
 info2 = latest(2)
-check("เกิน 10 นาทีจริง: polling ปิดห้องให้ และจับคู่คนไข้ 2 กับเภสัชกร 1 ต่อทันที", chat_state(info3["chat_id"]) == "failed"
-      and latest(3)["queue"] == "cancelled" and info2["queue"] == "in_progress" and info2["pharmacist_id"] == 1, str(info2))
-reply(1, info2["chat_id"])
-r = client.post(f"/pharmacist/1/chat/{info2['chat_id']}/expire")
-check("ห้องที่เภสัชกรตอบแล้วไม่ถูกนับว่าหมดเวลา", chat_state(info2["chat_id"]) == "consulting" and "ไม่นับว่าหมดเวลา" in r.get_data(as_text=True))
+check("หมดเวลา -> 'ให้คำปรึกษาไม่สำเร็จ' (chat closed, คิว cancelled)", r.status_code == 302 and info2["chat"] == "closed"
+      and info2["queue"] == "cancelled" and chat_state(room_2) == "failed", str(info2))
+check("หน้าคนไข้ 2 แจ้งว่าไม่สำเร็จและขอใหม่ได้", "ให้คำปรึกษาไม่สำเร็จ" in client.get("/patient/2").get_data(as_text=True))
+r = client.post(f"/pharmacist/{W}/chat/{room_1}/expire")
+check("ห้องที่เภสัชกรตอบแล้วไม่ถูกนับว่าหมดเวลา", chat_state(room_1) == "consulting" and "ไม่นับว่าหมดเวลา" in r.get_data(as_text=True))
+close(W, room_1)
+check("จบรอบ: ไม่มีห้องเปิดค้าง", open_chats() == {})
 
 print("\n=== รอบที่ 4 : ตัวนับเวลาเริ่มใหม่ทุกข้อความ (เภสัชกร 10 นาที / คนไข้ 5 นาที) ===")
 
@@ -308,22 +583,20 @@ def rewind(chat_id, minutes):
         conn.commit()
 
 
-def say(chat_id, sender, text):
-    return client.post(f"/api/chat/{chat_id}/messages", json={"sender_type": sender, "content": text})
-
-
 def message_count(chat_id):
     return scalar("SELECT COUNT(*) FROM chat_message WHERE chat_id = :c", c=chat_id)
 
 
-# เคลียร์ห้องที่ค้างจากรอบที่ 3 ให้เภสัชกรว่างทั้งสองคน
-reply(2, info4["chat_id"]); close(2, info4["chat_id"]); close(1, info2["chat_id"])
-check("เริ่มรอบ: ไม่มีห้องเปิดและไม่มีคิวรอ", open_chats() == {} and scalar("SELECT COUNT(*) FROM consult_queue WHERE status = 'waiting'") == 0)
-
-client.post("/patient/3/queue")
-room_a = latest(3); chat_t1, ph_a = room_a["chat_id"], room_a["pharmacist_id"]
+queue_t1 = enqueue(3, "ปวดท้อง")
+execute("UPDATE consult_queue SET entered_at = entered_at - INTERVAL '5' MINUTE WHERE queue_id = :q", q=queue_t1)
+home = client.get("/pharmacist/1").get_data(as_text=True)
+waited = re.search(r'class="elapsed" data-seconds="(\d+)"', home)
+check("เวลาที่รอในคิวนับจากเวลาที่เข้าคิว (รอมาแล้ว 5 นาที)", waited is not None and 300 <= int(waited.group(1)) <= 310,
+      waited.group(1) if waited else "")
+claim(1, queue_t1)
+chat_t1, ph_a = latest(3)["chat_id"], 1
 turn, left = timer(chat_t1)
-check("ห้องใหม่ยังไม่มีข้อความ: ตาเภสัชกร นับ 10 นาทีจากเวลาสร้างห้อง", turn == "pharmacist" and 590 <= left <= 600, f"({turn}, {left} วินาที)")
+check("ห้องใหม่ยังไม่มีข้อความ: ตาเภสัชกร นับ 10 นาทีจากเวลาที่รับเคส (ไม่ใช่เวลาที่เข้าคิว)", turn == "pharmacist" and 590 <= left <= 600, f"({turn}, {left} วินาที)")
 rewind(chat_t1, 4)
 check("เวลาผ่านไป 4 นาที: เหลือประมาณ 6 นาที", 350 <= timer(chat_t1)[1] <= 360, f"({timer(chat_t1)[1]} วินาที)")
 r = say(chat_t1, "patient", "ปวดท้องค่ะ")
@@ -334,8 +607,9 @@ page_f = client.get(f"/pharmacist/{ph_a}/chat/{chat_t1}").get_data(as_text=True)
 page_p = client.get(f"/patient/3/chat/{chat_t1}").get_data(as_text=True)
 check("หน้าแชทเภสัชกร (ฝ่ายที่ต้องตอบ): 'ต้องตอบภายใน' + ปุ่มทดสอบ", 'id="reply-timer"' in page_f and "timer-mine flex" in page_f
       and ">ต้องตอบภายใน</span>" in page_f and "ทดสอบ: เภสัชกรหมดเวลา" in page_f)
-check("หน้าแชทคนไข้ (อีกฝ่าย): 'รอเภสัชกรตอบกลับ' + ปุ่มทดสอบ", 'id="reply-timer"' in page_p and ">รอเภสัชกรตอบกลับ</span>" in page_p
-      and "timer-mine flex" not in page_p and "ทดสอบ: เภสัชกรหมดเวลา" in page_p)
+check("หน้าแชทคนไข้ (อีกฝ่าย): 'รอเภสัชกรตอบกลับ' + ปุ่มทดสอบ ไม่มีแถบห้องและช่องค้นหายา", 'id="reply-timer"' in page_p
+      and ">รอเภสัชกรตอบกลับ</span>" in page_p and "timer-mine flex" not in page_p and "ทดสอบ: เภสัชกรหมดเวลา" in page_p
+      and 'id="room-tabs"' not in page_p and "drugsearch.js" not in page_p)
 
 r = say(chat_t1, "pharmacist", "ปวดมากี่วันแล้วครับ")
 turn, left = timer(chat_t1)
@@ -356,12 +630,9 @@ home = client.get(f"/pharmacist/{ph_a}").get_data(as_text=True)
 check("หน้ารายการห้อง: ห้องระหว่างปรึกษาที่รอเภสัชกรตอบ กลับมาอยู่ในตารางรอตอบกลับพร้อมตัวนับ",
       "ห้องแชทที่รอตอบกลับ (1)" in home and chat_state(chat_t1) == "consulting" and re.search(r'class="countdown" data-seconds="(59\d|600)"', home) is not None)
 
-print("\n--- หมดเวลา: ข้อความถูกปฏิเสธฝั่งเซิร์ฟเวอร์ และคิวถัดไปได้ห้อง ---")
-client.post("/patient/1/queue")
-room_b = latest(1); chat_t2, ph_b = room_b["chat_id"], room_b["pharmacist_id"]
-client.post("/patient/2/queue"); client.post("/patient/4/queue")
-check("เภสัชกรเต็มทั้งสองคน มีคิวรอ 2 คิว (คนไข้ 2 ทั่วไป, คนไข้ 4 VIP)", {ph_a, ph_b} == {1, 2}
-      and latest(2)["queue"] == "waiting" and latest(4)["queue"] == "waiting" and position(4) == 1 and position(2) == 2)
+print("\n--- หมดเวลา: ข้อความถูกปฏิเสธฝั่งเซิร์ฟเวอร์ คิวที่รออยู่ไม่ถูกจับคู่เอง ---")
+chat_t2, ph_b = request(1, 2), 2
+queue_w = enqueue(4, "รออยู่ในคิว")                   # คิวที่รออยู่ระหว่างที่ห้องอื่นหมดเวลา
 
 rewind(chat_t1, 11)                                  # เภสัชกร ph_a ไม่ตอบคนไข้ 3 เกิน 10 นาที
 before_msgs = message_count(chat_t1)
@@ -371,9 +642,8 @@ check("เภสัชกรส่งหลังเกิน 10 นาที: �
       and "เภสัชกรไม่ได้ตอบภายใน 10 นาที" in r.get_json()["error"] and message_count(chat_t1) == before_msgs, r.get_json()["error"])
 check("เภสัชกรหมดเวลา -> 'ให้คำปรึกษาไม่สำเร็จ' (chat closed, คิว cancelled)", info["chat"] == "closed" and info["queue"] == "cancelled"
       and chat_state(chat_t1) == "failed", str(info))
-info4 = latest(4)
-check("หมดเวลาแล้วคิวถัดไป (VIP คนไข้ 4) ได้ห้องกับเภสัชกรคนเดิมใน Transaction เดียวกัน", info4["queue"] == "in_progress"
-      and info4["pharmacist_id"] == ph_a and info4["chat"] == "open" and latest(2)["queue"] == "waiting" and position(2) == 1, str(info4))
+check("ห้องหมดเวลาแล้ว คิวที่รออยู่ยัง waiting รอเภสัชกรกดรับเคสเอง", latest(4)["queue"] == "waiting" and latest(4)["chat_id"] is None
+      and position(4) == 1)
 r = say(chat_t1, "patient", "ยังอยู่ไหมคะ")
 check("ห้องที่หมดเวลาแล้ว ส่งข้อความต่อไม่ได้ทั้งสองฝ่าย", r.status_code == 409 and message_count(chat_t1) == before_msgs, r.get_json()["error"])
 
@@ -386,14 +656,13 @@ check("คนไข้ส่งหลังเกิน 5 นาที: เซ�
       and "คนไข้ไม่ได้ตอบภายใน 5 นาที" in r.get_json()["error"] and message_count(chat_t2) == before_msgs, r.get_json()["error"])
 check("คนไข้หมดเวลา -> 'ปิดห้องแชทแล้ว' (chat closed, คิว completed)", info["chat"] == "closed" and info["queue"] == "completed"
       and chat_state(chat_t2) == "closed", str(info))
-info2 = latest(2)
-check("คนไข้หมดเวลาแล้วคิวถัดไป (คนไข้ 2) ได้ห้องกับเภสัชกรที่ว่างลง", info2["queue"] == "in_progress" and info2["pharmacist_id"] == ph_b
-      and info2["chat"] == "open", str(info2))
 r = say(chat_t2, "pharmacist", "ยังอยู่ไหมครับ")
 check("ห้องที่คนไข้หมดเวลาแล้ว เภสัชกรก็ส่งต่อไม่ได้", r.status_code == 409 and message_count(chat_t2) == before_msgs)
 
 print("\n--- ปุ่มทดสอบหมดเวลา ทั้งสองฝั่ง และการหมดเวลาจริงผ่าน polling ---")
-chat_v, chat_g = info4["chat_id"], info2["chat_id"]  # ห้องของคนไข้ 4 (กับ ph_a) และคนไข้ 2 (กับ ph_b) ยังไม่มีข้อความ
+claim(ph_a, queue_w)
+chat_v = latest(4)["chat_id"]                        # ห้องของคนไข้ 4 กับ ph_a ยังไม่มีข้อความ
+chat_g = request(2, ph_b)                            # ห้องของคนไข้ 2 กับ ph_b ยังไม่มีข้อความ
 r = client.post(f"/patient/4/chat/{chat_v}/expire", data={"side": "patient"})
 check("ปุ่มทดสอบ 'คนไข้หมดเวลา' ตอนเป็นตาเภสัชกร: ไม่มีผล", r.status_code == 302 and latest(4)["chat"] == "open")
 say(chat_v, "pharmacist", "สวัสดีครับ")
@@ -406,18 +675,39 @@ info = latest(2)
 check("ปุ่มทดสอบ 'เภสัชกรหมดเวลา' (กดจากหน้าแชทเภสัชกร): 'ให้คำปรึกษาไม่สำเร็จ'", r.status_code == 302 and info["chat"] == "closed"
       and info["queue"] == "cancelled" and chat_state(chat_g) == "failed", str(info))
 
-client.post("/patient/3/queue")
-chat_w = latest(3)["chat_id"]; ph_w = latest(3)["pharmacist_id"]
+chat_w, ph_w = request(3, 1), 1
 say(chat_w, "pharmacist", "สวัสดีครับ")
 rewind(chat_w, 6)
 client.get(f"/api/pharmacist/{ph_w}/state")          # polling ของหน้ารายการห้อง
 check("คนไข้เกิน 5 นาทีจริง: polling ปิดห้องให้อัตโนมัติเป็น 'ปิดห้องแชทแล้ว'", chat_state(chat_w) == "closed" and latest(3)["queue"] == "completed")
-check("จบรอบ: ไม่มีห้องเปิดค้าง", open_chats() == {})
+chat_x = request(3, 2)
+rewind(chat_x, 11)
+client.get("/api/pharmacist/2/rooms")                # polling ของแถบห้องในหน้าแชท
+check("เภสัชกรเกิน 10 นาทีจริง: polling ปิดห้องให้อัตโนมัติเป็น 'ให้คำปรึกษาไม่สำเร็จ'", chat_state(chat_x) == "failed" and latest(3)["queue"] == "cancelled")
+check("จบรอบ: ไม่มีห้องเปิดค้างและไม่มีคิวรอ", open_chats() == {} and waiting_count() == 0)
+
+print("\n=== ตรวจรวม : แถว rejected ไม่ปนกับคำสั่งซื้อจริง ===")
+check("แถว rejected ทุกแถวไม่มี order_detail / payment / receipt", scalar("""
+    SELECT COUNT(*) FROM orders o
+    WHERE  o.status = 'rejected'
+    AND   (EXISTS (SELECT 1 FROM order_detail d WHERE d.order_id = o.order_id)
+        OR EXISTS (SELECT 1 FROM payment y      WHERE y.order_id = o.order_id)
+        OR EXISTS (SELECT 1 FROM receipt r      WHERE r.order_id = o.order_id))""") == 0)
+check("ใบสั่งยาแต่ละใบมีคำสั่งซื้อจริง (ไม่ใช่ rejected) ไม่เกิน 1 ใบ", scalar("""
+    SELECT NVL(MAX(n), 0) FROM (SELECT COUNT(*) AS n FROM orders WHERE status <> 'rejected' GROUP BY prescription_id)""") == 1)
+statuses = {r_["status"]: r_["n"] for r_ in db.query("SELECT status, COUNT(*) AS n FROM orders GROUP BY status")}
+check("สรุป orders: paid 2 (คนไข้ 1, 2) + rejected 4", statuses == {"paid": 2, "rejected": 4}, str(statuses))
+for pid in (1, 2, 3, 4):
+    page = client.get(f"/patient/{pid}/orders").get_data(as_text=True)
+    home = client.get(f"/patient/{pid}").get_data(as_text=True)
+    check(f"คนไข้ {pid}: หน้าประวัติและหน้าหลักไม่มีรายการ rejected ไปโผล่เป็น 'รอชำระเงิน' หรือมีปุ่มชำระเงิน",
+          "รอชำระเงิน" not in page and ">ชำระเงิน</a>" not in page and "รอชำระเงิน" not in home)
 
 print("\n=== หน้าจออื่น ๆ ===")
 for url in ["/", "/patient/1", "/patient/2", "/patient/3", "/patient/4", "/pharmacist/1", "/pharmacist/2",
-            "/pharmacist/1/stock", "/api/patient/1/state", "/api/pharmacist/1/state",
-            f"/patient/3/prescription/{rx3}", f"/pharmacist/1/chat/{chat_b}", f"/patient/2/chat/{chat_b}"]:
+            "/pharmacist/1/stock", "/api/patient/1/state", "/api/pharmacist/1/state", "/api/pharmacist/1/rooms",
+            "/patient/1/orders", "/patient/3/orders", f"/patient/3/prescription/{rx3}", f"/patient/4/prescription/{rx_v}",
+            f"/pharmacist/{L}/chat/{room_2}", f"/patient/2/chat/{room_2}", f"/pharmacist/{W}/chat/{room_v}"]:
     check(f"GET {url}", client.get(url).status_code == 200)
 
 print(f"\nสรุป: {'ผ่านทั้งหมด' if failed == 0 else f'ไม่ผ่าน {failed} ข้อ'}")

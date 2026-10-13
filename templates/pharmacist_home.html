@@ -9,13 +9,60 @@
 {% set waiting = chats|selectattr('status', 'equalto', 'open')|selectattr('turn', 'equalto', 'pharmacist')|list %}
 {% set others = chats|reject('in', waiting)|list %}
 <div class="space-y-6">
+  <!-- คิวที่รอเภสัชกรรับเคส : แสดงทุกคิวที่ waiting เรียง VIP ก่อน แล้วตามเวลาที่เข้าคิว
+       หน้านี้ reload เองเมื่อรายการเปลี่ยน (poll.js ถาม api_pharmacist_state ทุก 3 วินาที) -->
+  <section class="bg-white rounded-xl shadow-sm border border-slate-200/90 overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center space-x-2 text-teal-800">
+        <svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <h2 class="text-base font-semibold text-slate-800">คิวรอรับเคส ({{ queue|length }})</h2>
+      </div>
+      <span class="text-xs text-slate-400">VIP ก่อน แล้วตามเวลาที่เข้าคิว · เลือกรับเคสได้เอง รับได้หลายเคสพร้อมกัน</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left dashboard-table">
+        <thead>
+          <tr>
+            <th class="w-16 text-center" scope="col">ลำดับ</th>
+            <th class="w-20 text-center" scope="col">คิวที่</th>
+            <th class="min-w-[180px]" scope="col">คนไข้</th>
+            <th class="w-28 text-center" scope="col">เวลาที่รอ</th>
+            <th class="min-w-[220px]" scope="col">อาการเบื้องต้น</th>
+            <th class="w-28 text-center" scope="col">การจัดการ</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for q in queue %}
+          <tr>
+            <td class="text-center font-medium text-slate-600">{{ loop.index }}</td>
+            <td class="text-center font-semibold text-slate-700">{{ q.queue_no }}</td>
+            <td class="font-medium text-slate-800">
+              <span class="whitespace-nowrap">{{ q.patient_name }}</span>
+              {% if q.member_type == 'vip' %}<span class="ml-1.5 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-amber-300">VIP</span>{% endif %}
+            </td>
+            <td class="text-center text-slate-600 font-mono text-sm"><span class="elapsed" data-seconds="{{ q.waited_seconds }}"></span></td>
+            <td class="text-slate-600 text-sm">{% if q.symptom_note %}<span title="{{ q.symptom_note }}">{{ q.symptom_note|truncate(60, True, '…', 0) }}</span>{% else %}<span class="text-slate-400">-</span>{% endif %}</td>
+            <td class="text-center">
+              <form method="post" action="{{ url_for('pharmacist_claim', phid=pharmacist.pharmacist_id, queue_id=q.queue_id) }}">
+                <button class="inline-flex items-center px-3.5 py-1.5 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium transition shadow-sm whitespace-nowrap" type="submit">รับเคส</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-center !text-slate-400 !py-8">ไม่มีคิวที่รอรับเคส หน้านี้จะอัปเดตเองเมื่อมีคนไข้เข้าคิว</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="bg-white rounded-xl shadow-sm border border-slate-200/90 overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center space-x-2 text-teal-800">
         <svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" stroke-linecap="round" stroke-linejoin="round"></path></svg>
         <h2 class="text-base font-semibold text-slate-800">ห้องแชทที่รอตอบกลับ ({{ waiting|length }})</h2>
       </div>
-      <span class="text-xs text-slate-400">ระบบจับคู่ให้อัตโนมัติ · ต้องตอบภายใน 10 นาทีนับจากข้อความล่าสุดของคนไข้</span>
+      <span class="text-xs text-slate-400">เคสที่รับไว้ · ต้องตอบภายใน 10 นาทีนับจากข้อความล่าสุดของคนไข้</span>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full text-left dashboard-table">
@@ -56,7 +103,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="7" class="text-center !text-slate-400 !py-8">ไม่มีห้องแชทที่รอตอบกลับ หน้านี้จะอัปเดตเองเมื่อระบบจับคู่คนไข้ให้หรือคนไข้ส่งข้อความ</td></tr>
+          <tr><td colspan="7" class="text-center !text-slate-400 !py-8">ไม่มีห้องแชทที่รอตอบกลับ หน้านี้จะอัปเดตเองเมื่อคนไข้ส่งข้อความ</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -116,7 +163,8 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='poll.js') }}"></script>
 <script>
-  reloadOnChange("{{ url_for('api_pharmacist_state', phid=pharmacist.pharmacist_id) }}", 2000);
+  reloadOnChange("{{ url_for('api_pharmacist_state', phid=pharmacist.pharmacist_id) }}", 3000);
   startCountdowns();
+  startElapsed();
 </script>
 {% endblock %}

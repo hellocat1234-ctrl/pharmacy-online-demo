@@ -111,6 +111,49 @@
     @apply bg-rose-50 text-rose-600 border-rose-200;
   }
 
+  /* ช่องค้นหายา : drugsearch.js สร้าง <li> ใน .drug-results และสลับ class active / disabled / empty */
+  .drug-results {
+    @apply absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 text-xs shadow-lg sm:text-sm;
+  }
+  .drug-results li {
+    @apply cursor-pointer px-3 py-2 text-slate-700;
+  }
+  .drug-results li.active {
+    @apply bg-teal-600 text-white;
+  }
+  .drug-results li.disabled {
+    @apply cursor-not-allowed text-slate-400;
+  }
+  .drug-results li.empty {
+    @apply cursor-default text-slate-400;
+  }
+
+  /* แถบห้องแชทที่เปิดอยู่ของเภสัชกร : rooms.js สร้าง <a class="room-tab [active] [has-new]"> ใน #room-list */
+  .room-tabs, .room-list {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .room-tab {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-teal-300 hover:text-teal-700;
+  }
+  .room-tab.active {
+    @apply border-teal-600 bg-teal-600 text-white hover:text-white;
+  }
+  .room-tab.has-new {
+    @apply border-rose-300 bg-rose-50 text-rose-700;
+  }
+  .room-tab-queue {
+    @apply bg-slate-50;
+  }
+  .room-new {
+    @apply rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-semibold text-white;
+  }
+  .room-count {
+    @apply rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600;
+  }
+  .room-count.has-waiting {
+    @apply bg-amber-500 text-white;
+  }
+
   /* ตัวนับเวลาถอยหลัง : poll.js เพิ่ม text-danger เมื่อเหลือไม่เกิน 1 นาที */
   .countdown.text-danger {
     @apply text-rose-700 font-bold;

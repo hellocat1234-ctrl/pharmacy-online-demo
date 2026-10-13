@@ -21,6 +21,20 @@ function formatCountdown(seconds) {
   return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
 }
 
+// เวลาที่รอในคิว : อ่านวินาทีที่รอมาแล้วจาก data-seconds แล้วเพิ่มทีละ 1 ทุกวินาที
+function startElapsed() {
+  const items = [...document.querySelectorAll(".elapsed")].map((el) => ({ el, waited: Number(el.dataset.seconds) }));
+  function draw() {
+    for (const it of items) {
+      const m = Math.floor(it.waited / 60), s = it.waited % 60;
+      it.el.textContent = String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+      it.waited += 1;
+    }
+  }
+  draw();
+  setInterval(draw, 1000);
+}
+
 // ตัวนับเวลาถอยหลัง 10 นาที : อ่านวินาทีที่เหลือจาก data-seconds แล้วลดทีละ 1 ทุกวินาที
 function startCountdowns() {
   const items = [...document.querySelectorAll(".countdown")].map((el) => ({ el, left: Number(el.dataset.seconds) }));

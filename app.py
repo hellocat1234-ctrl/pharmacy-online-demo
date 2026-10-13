@@ -8,17 +8,18 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, url
 
 import db
 import transactions as tx
-from transactions import CHAT_STATE_SQL, QUEUE_ORDER_SQL, SECONDS_LEFT_SQL, TURN_SQL, DemoError
+from transactions import (CHAT_STATE_SQL, QUEUE_ORDER_SQL, SECONDS_LEFT_SQL, SYMPTOM_NOTE_MAX, TURN_SQL,
+                          DemoError, RejectedError)
 
 app = Flask(__name__)
 
 STATUS_TH = {
     # สถานะคิว (consult_queue.status)
-    "waiting": "รอจับคู่", "in_progress": "จับคู่แล้ว", "completed": "เสร็จสิ้น", "cancelled": "ยกเลิก",
+    "waiting": "รอเภสัชกรรับเคส", "in_progress": "เภสัชกรรับเคสแล้ว", "completed": "เสร็จสิ้น", "cancelled": "ยกเลิก",
     # สถานะห้องแชทตามรายงาน (คำนวณจาก chat_room.status + ข้อความ + สถานะคิว ดู CHAT_STATE_SQL)
     "waiting_reply": "รอตอบกลับ", "consulting": "ระหว่างปรึกษา",
     "failed": "ให้คำปรึกษาไม่สำเร็จ", "closed": "ปิดห้องแชทแล้ว", "open": "เปิด",
-    "pending_payment": "รอชำระเงิน", "paid": "ชำระเงินแล้ว", "preparing": "กำลังจัดยา",
+    "pending_payment": "รอชำระเงิน", "paid": "ชำระเงินแล้ว", "preparing": "กำลังจัดยา", "rejected": "ถูกปฏิเสธ",
     "shipped": "จัดส่งแล้ว", "success": "สำเร็จ", "qr_code": "QR Code", "bank_transfer": "โอนเงิน",
 }
 
@@ -71,16 +72,20 @@ def get_chat(chat_id):
 
 
 def get_prescription(prescription_id, patient_id):
+    # คำสั่งซื้อของใบสั่งยา = คำสั่งซื้อที่ไม่ใช่ rejected (มีได้ใบเดียว ตาม uq_orders_prescription)
+    # rejected_count = จำนวนครั้งที่ใบสั่งยานี้เคยถูกระบบปฏิเสธตอนสั่งซื้อ
     rx = db.query_one("""
         SELECT r.prescription_id, r.chat_id, TO_CHAR(r.prescribed_date, 'DD/MM/YYYY') AS prescribed_date,
                r.prescribed_time, f.first_name || ' ' || f.last_name AS pharmacist_name,
-               ph.name AS pharmacy_name, o.order_id, o.status AS order_status
+               ph.name AS pharmacy_name, o.order_id, o.status AS order_status,
+               (SELECT COUNT(*) FROM orders x
+                WHERE  x.prescription_id = r.prescription_id AND x.status = 'rejected') AS rejected_count
         FROM   prescription r
                JOIN pharmacist f    ON f.pharmacist_id = r.pharmacist_id
                JOIN chat_room c     ON c.chat_id = r.chat_id
                JOIN consult_queue q ON q.queue_id = c.queue_id
                JOIN pharmacy ph     ON ph.pharmacy_id = q.pharmacy_id
-               LEFT JOIN orders o   ON o.prescription_id = r.prescription_id
+               LEFT JOIN orders o   ON o.prescription_id = r.prescription_id AND o.status <> 'rejected'
         WHERE  r.prescription_id = :rx_id AND r.patient_id = :patient_id""",
         rx_id=prescription_id, patient_id=patient_id)
     if rx is None:
@@ -131,7 +136,7 @@ def default_address(patient_id):
 def patient_home_data(patient_id):
     """การขอคำปรึกษาครั้งล่าสุด (คิว + ห้องแชท + สถานะห้องแชท) และใบสั่งยาทั้งหมดของคนไข้"""
     queue = db.query_one(f"""
-        SELECT q.queue_id, q.queue_no, q.status, q.member_type, q.pharmacy_id, c.chat_id,
+        SELECT q.queue_id, q.queue_no, q.status, q.member_type, q.pharmacy_id, q.symptom_note, c.chat_id,
                f.first_name || ' ' || f.last_name AS pharmacist_name,
                CASE WHEN c.chat_id IS NOT NULL THEN {CHAT_STATE_SQL} END AS chat_state
         FROM   consult_queue q
@@ -153,17 +158,48 @@ def patient_home_data(patient_id):
     prescriptions = db.query("""
         SELECT r.prescription_id, r.chat_id, TO_CHAR(r.prescribed_date, 'DD/MM/YYYY') AS prescribed_date,
                r.prescribed_time, f.first_name || ' ' || f.last_name AS pharmacist_name,
-               o.order_id, o.status AS order_status
+               o.order_id, o.status AS order_status,
+               (SELECT COUNT(*) FROM orders x
+                WHERE  x.prescription_id = r.prescription_id AND x.status = 'rejected') AS rejected_count
         FROM   prescription r
                JOIN pharmacist f  ON f.pharmacist_id = r.pharmacist_id
-               LEFT JOIN orders o ON o.prescription_id = r.prescription_id
+               LEFT JOIN orders o ON o.prescription_id = r.prescription_id AND o.status <> 'rejected'
         WHERE  r.patient_id = :id
         ORDER  BY r.prescription_id DESC""", id=patient_id)
     return queue, prescriptions
 
 
+def waiting_queue(pharmacy_id):
+    """คิวที่รอเภสัชกรรับเคส "ทั้งหมด" ของร้าน : VIP ก่อน แล้วตามเวลาที่เข้าคิว
+    waited_seconds = เวลาที่รอมาแล้ว นับจาก entered_at"""
+    return db.query(f"""
+        SELECT q.queue_id, q.queue_no, q.member_type, q.symptom_note,
+               p.first_name || ' ' || p.last_name AS patient_name, p.chronic_disease,
+               TO_CHAR(q.entered_at, 'HH24:MI:SS') AS entered_at,
+               ROUND((CAST(CURRENT_TIMESTAMP AS DATE) - CAST(q.entered_at AS DATE)) * 86400) AS waited_seconds
+        FROM   consult_queue q
+               JOIN patient p ON p.patient_id = q.patient_id
+        WHERE  q.pharmacy_id = :pharmacy_id AND q.status = 'waiting'
+        ORDER  BY {QUEUE_ORDER_SQL}""", pharmacy_id=pharmacy_id)
+
+
+def open_rooms(pharmacist_id):
+    """ห้องแชทที่ยังเปิดอยู่ของเภสัชกร (รับได้หลายห้องพร้อมกัน) ใช้ทำรายการสลับห้องในหน้าแชท
+    last_patient_message_id ใช้บอกว่าห้องไหนมีข้อความใหม่จากคนไข้ (0 = คนไข้ยังไม่ส่งข้อความ)"""
+    return db.query(f"""
+        SELECT c.chat_id, q.queue_no, q.member_type, p.first_name || ' ' || p.last_name AS patient_name,
+               {TURN_SQL} AS turn,
+               NVL((SELECT MAX(m.message_id) FROM chat_message m
+                    WHERE  m.chat_id = c.chat_id AND m.sender_type = 'patient'), 0) AS last_patient_message_id
+        FROM   chat_room c
+               JOIN consult_queue q ON q.queue_id = c.queue_id
+               JOIN patient p       ON p.patient_id = q.patient_id
+        WHERE  c.pharmacist_id = :id AND c.status = 'open'
+        ORDER  BY c.chat_id""", id=pharmacist_id)
+
+
 def pharmacist_home_data(pharmacist):
-    """ห้องแชททั้งหมดที่ระบบจับคู่ให้เภสัชกรคนนี้ : ห้องที่รอตอบกลับขึ้นก่อน"""
+    """ห้องแชททั้งหมดที่เภสัชกรคนนี้รับเคสไว้ : ห้องที่รอตอบกลับขึ้นก่อน"""
     return db.query(f"""
         SELECT c.chat_id, q.queue_no, p.first_name || ' ' || p.last_name AS patient_name,
                p.chronic_disease, TO_CHAR(c.started_at, 'HH24:MI:SS') AS started_at,
@@ -206,11 +242,12 @@ def enter():
 # ---------------------------------------------------------------------
 # ฝั่งคนไข้
 # ---------------------------------------------------------------------
-def render_patient_home(pid, error=None):
+def render_patient_home(pid, error=None, symptom_note=""):
     patient = get_patient(pid)
     queue, prescriptions = patient_home_data(pid)
     return render_template("patient_home.html", patient=patient, queue=queue,
-                           prescriptions=prescriptions, error=error)
+                           prescriptions=prescriptions, error=error, symptom_note=symptom_note,
+                           symptom_note_max=SYMPTOM_NOTE_MAX)
 
 
 @app.get("/patient/<int:pid>")
@@ -220,10 +257,12 @@ def patient_home(pid):
 
 @app.post("/patient/<int:pid>/queue")
 def patient_request_consult(pid):
+    # textarea ส่งขึ้นบรรทัดใหม่เป็น \r\n : แปลงเป็น \n ก่อน เพื่อให้นับความยาวตรงกับ maxlength ของหน้าเว็บ
+    symptom_note = request.form.get("symptom_note", "").replace("\r\n", "\n")
     try:
-        tx.request_consult(pid)
+        tx.request_consult(pid, symptom_note)
     except DemoError as exc:
-        return render_patient_home(pid, error=str(exc))
+        return render_patient_home(pid, error=str(exc), symptom_note=symptom_note)
     return redirect(url_for("patient_home", pid=pid))
 
 
@@ -255,8 +294,14 @@ def patient_place_order(pid, rx_id):
     shipping_address = request.form.get("shipping_address", "")
     try:
         order_id = tx.place_order(pid, rx_id, shipping_address)
+    except RejectedError as exc:
+        # ระบบปฏิเสธ (เช่น สต็อกไม่พอ) : Transaction ถูก ROLLBACK แล้ว และมีแถว orders สถานะ rejected เป็นร่องรอย
+        error = str(exc)
+        if exc.rejected_order_id:
+            error += f" (บันทึกเป็นคำสั่งซื้อเลขที่ {exc.rejected_order_id} สถานะ “ถูกปฏิเสธ”)"
+        return render_prescription(pid, rx_id, error=error, shipping_address=shipping_address)
     except DemoError as exc:
-        # กรณีปฏิเสธ (เช่น สต็อกไม่พอ) : Transaction ถูก ROLLBACK แล้ว แสดงข้อความบนหน้าเดิม
+        # กรอกข้อมูลไม่ถูกต้อง (เช่น ที่อยู่ว่าง, สั่งซ้ำ) : ไม่บันทึกร่องรอย แสดงข้อความบนหน้าเดิม
         return render_prescription(pid, rx_id, error=str(exc), shipping_address=shipping_address)
     return redirect(url_for("patient_pay", pid=pid, order_id=order_id))
 
@@ -270,6 +315,9 @@ def render_pay(pid, order_id, error=None):
 @app.get("/patient/<int:pid>/order/<int:order_id>/pay")
 def patient_pay(pid, order_id):
     order = get_order(order_id, pid)
+    if order["status"] == "rejected":
+        # คำสั่งซื้อที่ถูกปฏิเสธไม่มีรายการยาและชำระเงินไม่ได้ : กลับไปหน้าประวัติคำสั่งซื้อ
+        return redirect(url_for("patient_orders", pid=pid))
     if order["status"] != "pending_payment":
         return redirect(url_for("patient_receipt", pid=pid, order_id=order_id))
     return render_pay(pid, order_id)
@@ -304,6 +352,7 @@ def patient_receipt(pid, order_id):
         WHERE  r.order_id = :order_id AND r.patient_id = :patient_id""",
         order_id=order_id, patient_id=pid)
     if receipt is None:
+        # ยังไม่มีใบเสร็จ : patient_pay ส่งต่อไปหน้าชำระเงิน หรือหน้าประวัติถ้าเป็นคำสั่งซื้อที่ถูกปฏิเสธ
         return redirect(url_for("patient_pay", pid=pid, order_id=order_id))
     lines = db.query("""
         SELECT d.line_no, g.name AS drug_name, d.dosage, d.quantity, d.unit_price, d.total_amount
@@ -339,12 +388,24 @@ def patient_orders(pid):
 def render_pharmacist_home(phid, error=None):
     pharmacist = get_pharmacist(phid)
     chats = pharmacist_home_data(pharmacist)
-    return render_template("pharmacist_home.html", pharmacist=pharmacist, chats=chats, error=error)
+    return render_template("pharmacist_home.html", pharmacist=pharmacist, chats=chats, error=error,
+                           queue=waiting_queue(pharmacist["pharmacy_id"]))
 
 
 @app.get("/pharmacist/<int:phid>")
 def pharmacist_home(phid):
     return render_pharmacist_home(phid)
+
+
+@app.post("/pharmacist/<int:phid>/queue/<int:queue_id>/claim")
+def pharmacist_claim(phid, queue_id):
+    """ปุ่ม "รับเคส" : สำเร็จ -> เข้าห้องแชทที่สร้าง, มีคนรับไปก่อน -> กลับหน้ารายการคิว (รายการล่าสุด) พร้อมข้อความ"""
+    get_pharmacist(phid)
+    try:
+        chat_id = tx.claim_queue(phid, queue_id)
+    except DemoError as exc:
+        return render_pharmacist_home(phid, error=str(exc))
+    return redirect(url_for("pharmacist_chat", phid=phid, chat_id=chat_id))
 
 
 @app.post("/pharmacist/<int:phid>/chat/<int:chat_id>/close")
@@ -386,19 +447,49 @@ def patient_expire_chat(pid, chat_id):
     return redirect(url_for("patient_chat", pid=pid, chat_id=chat_id))
 
 
+# ยา + คงเหลือรวมของล็อตที่ยังไม่หมดอายุ (ตัวเลขเดียวกับหน้าสต็อกยาและข้อความปฏิเสธตอนสั่งซื้อ)
+DRUG_SELECT_SQL = """
+    SELECT g.drug_id, g.name,
+           NVL((SELECT SUM(b.quantity) FROM drug_batch b
+                WHERE  b.drug_id = g.drug_id AND b.expiry_date > TRUNC(SYSDATE)), 0) AS stock
+    FROM   drug g"""
+
+DRUG_SEARCH_LIMIT = 10
+
+
+def drug_label(drug):
+    """ข้อความที่แสดงในช่องค้นหายา : รหัส · ชื่อยา · สต็อกคงเหลือ"""
+    stock = "หมด" if drug["stock"] == 0 else f"เหลือ {drug['stock']}"
+    return f"{drug['drug_id']} · {drug['name']} · {stock}"
+
+
+def search_drugs(pharmacy_id, q):
+    """ค้นยาของร้านจากข้อความที่พิมพ์ : ชื่อยา (ค้นกลางคำได้) หรือรหัสยา (ขึ้นต้นด้วย) ไม่เกิน 10 รายการ
+    ข้อความของผู้ใช้ส่งเป็น bind variable (:q) เท่านั้น  ตัวอักษร % _ \\ ถูก escape ให้ LIKE มองเป็นตัวอักษรธรรมดา"""
+    q = (q or "").strip()[:100]
+    if not q:
+        return []
+    q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return db.query(DRUG_SELECT_SQL + """
+        WHERE  g.pharmacy_id = :pharmacy_id AND g.deleted_at IS NULL
+        AND   (LOWER(g.name) LIKE '%' || LOWER(:q) || '%' ESCAPE '\\'
+           OR  TO_CHAR(g.drug_id) LIKE :q || '%' ESCAPE '\\')
+        ORDER  BY g.name
+        FETCH FIRST :limit ROWS ONLY""", pharmacy_id=pharmacy_id, q=q, limit=DRUG_SEARCH_LIMIT)
+
+
 def render_pharmacist_chat(phid, chat_id, error=None, form_rows=None):
     pharmacist = get_pharmacist(phid)
     chat = get_chat(chat_id)
     if chat["pharmacist_id"] != phid:
         abort(404)
-    # ยาของร้านที่เภสัชกรสังกัด + จำนวนคงเหลือรวมของล็อตที่ยังไม่หมดอายุ
-    drugs = db.query("""
-        SELECT g.drug_id, g.name, g.dosage_form, g.price,
-               NVL((SELECT SUM(b.quantity) FROM drug_batch b
-                    WHERE  b.drug_id = g.drug_id AND b.expiry_date > TRUNC(SYSDATE)), 0) AS stock
-        FROM   drug g
-        WHERE  g.pharmacy_id = :pharmacy_id AND g.deleted_at IS NULL
-        ORDER  BY g.drug_id""", pharmacy_id=pharmacist["pharmacy_id"])
+    # ฟอร์มใบสั่งยาที่ถูกปฏิเสธ : คืนค่าที่กรอกไว้ พร้อมข้อความในช่องค้นหายาของยาที่เลือกไว้แล้ว
+    form_rows = [dict(row) for row in (form_rows or [])]
+    for row in form_rows:
+        if str(row.get("drug_id") or "").isdigit():
+            drug = db.query_one(DRUG_SELECT_SQL + " WHERE g.pharmacy_id = :pharmacy_id AND g.drug_id = :drug_id",
+                                pharmacy_id=pharmacist["pharmacy_id"], drug_id=int(row["drug_id"]))
+            row["drug_label"] = drug_label(drug) if drug else ""
     rx_lines = []
     if chat["prescription_id"]:
         rx_lines = db.query("""
@@ -406,8 +497,8 @@ def render_pharmacist_chat(phid, chat_id, error=None, form_rows=None):
             FROM   prescription_detail d JOIN drug g ON g.drug_id = d.drug_id
             WHERE  d.prescription_id = :rx_id ORDER BY d.line_no""", rx_id=chat["prescription_id"])
     return render_template("chat.html", role="pharmacist", pharmacist=pharmacist, chat=chat,
-                           drugs=drugs, rx_lines=rx_lines, error=error,
-                           form_rows=(form_rows or []) + [{}] * 3)
+                           rooms=open_rooms(phid), rx_lines=rx_lines, error=error,
+                           form_rows=form_rows + [{}] * 3)
 
 
 @app.get("/pharmacist/<int:phid>/chat/<int:chat_id>")
@@ -510,9 +601,28 @@ def api_patient_state(pid):
 
 @app.get("/api/pharmacist/<int:phid>/state")
 def api_pharmacist_state(phid):
+    """ลายเซ็นของหน้ารายการคิว/ห้องของเภสัชกร : หน้าเว็บ reload เมื่อคิวที่รอหรือห้องของตัวเองเปลี่ยน"""
     tx.expire_overdue()
-    chats = pharmacist_home_data(get_pharmacist(phid))
-    return jsonify(state=[(c["chat_id"], c["state"], c["turn"], c["prescription_id"]) for c in chats])
+    pharmacist = get_pharmacist(phid)
+    chats = pharmacist_home_data(pharmacist)
+    return jsonify(state=[[q["queue_id"] for q in waiting_queue(pharmacist["pharmacy_id"])],
+                          [(c["chat_id"], c["state"], c["turn"], c["prescription_id"]) for c in chats]])
+
+
+@app.get("/api/pharmacist/<int:phid>/rooms")
+def api_pharmacist_rooms(phid):
+    """ห้องที่เปิดอยู่ของเภสัชกร + จำนวนคิวที่รอรับเคส : หน้าแชทใช้ทำรายการสลับห้องและแจ้งข้อความใหม่ในห้องอื่น"""
+    tx.expire_overdue()
+    pharmacist = get_pharmacist(phid)
+    return jsonify(rooms=open_rooms(phid), waiting=len(waiting_queue(pharmacist["pharmacy_id"])))
+
+
+@app.get("/api/pharmacist/<int:phid>/drugs")
+def api_drug_search(phid):
+    """ช่องค้นหายาในฟอร์มใบสั่งยา : q ว่าง -> รายการว่าง"""
+    pharmacist = get_pharmacist(phid)
+    drugs = search_drugs(pharmacist["pharmacy_id"], request.args.get("q", ""))
+    return jsonify(drugs=[dict(d, label=drug_label(d)) for d in drugs])
 
 
 @app.errorhandler(DemoError)

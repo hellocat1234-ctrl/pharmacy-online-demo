@@ -30,10 +30,16 @@
         <tr class="hover:bg-teal-50/20 transition-colors">
           <td class="py-3.5 px-4 font-mono font-medium text-slate-900 text-center">{{ o.order_id }}</td>
           <td class="py-3.5 px-4 font-mono text-xs text-slate-600 whitespace-nowrap">{{ o.ordered_at }}</td>
+          {# คำสั่งซื้อที่ระบบปฏิเสธ (rejected) มีแต่แถว orders เป็นร่องรอย ไม่มี order_detail จึงไม่มีรายการและยอดรวม #}
+          {% if o.status == 'rejected' %}
+          <td class="py-3.5 px-4 text-slate-400">ใบสั่งยาเลขที่ {{ o.prescription_id }} (ไม่มีรายการยา ไม่ตัดสต็อก)</td>
+          <td class="py-3.5 px-4 text-right text-slate-400">-</td>
+          {% else %}
           <td class="py-3.5 px-4 font-medium text-slate-800">{{ o['items'] }}</td>
           <td class="py-3.5 px-4 text-right font-mono font-bold text-slate-800">{{ o.total|baht }}</td>
+          {% endif %}
           <td class="py-3.5 px-4 text-center">
-            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border whitespace-nowrap {{ 'bg-amber-100 text-amber-700 border-amber-200' if o.status == 'pending_payment' else 'bg-emerald-100 text-emerald-800 border-emerald-200' }}">{{ o.status|th }}</span>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border whitespace-nowrap {{ {'pending_payment': 'bg-amber-100 text-amber-700 border-amber-200', 'rejected': 'bg-rose-100 text-rose-800 border-rose-200'}.get(o.status, 'bg-emerald-100 text-emerald-800 border-emerald-200') }}">{{ o.status|th }}</span>
           </td>
           <td class="py-3.5 px-4 text-center text-slate-600 whitespace-nowrap">{{ o.method|th if o.method else '-' }}</td>
           <td class="py-3.5 px-4 text-center">
@@ -41,7 +47,9 @@
             {% else %}<span class="text-slate-400">-</span>{% endif %}
           </td>
           <td class="py-3.5 px-4 text-center">
-            {% if o.status == 'pending_payment' %}
+            {% if o.status == 'rejected' %}
+              <a class="inline-flex items-center px-3.5 py-1.5 rounded-md bg-white hover:bg-teal-50 text-teal-700 border border-teal-600 text-xs font-medium transition whitespace-nowrap" href="{{ url_for('patient_prescription', pid=patient.patient_id, rx_id=o.prescription_id) }}">ดูใบสั่งยา</a>
+            {% elif o.status == 'pending_payment' %}
               <a class="inline-flex items-center px-3.5 py-1.5 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium transition shadow-sm whitespace-nowrap" href="{{ url_for('patient_pay', pid=patient.patient_id, order_id=o.order_id) }}">ชำระเงิน</a>
             {% else %}
               <a class="inline-flex items-center px-3.5 py-1.5 rounded-md bg-white hover:bg-teal-50 text-teal-700 border border-teal-600 text-xs font-medium transition whitespace-nowrap" href="{{ url_for('patient_receipt', pid=patient.patient_id, order_id=o.order_id) }}">ใบเสร็จ</a>

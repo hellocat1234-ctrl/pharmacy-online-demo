@@ -29,9 +29,12 @@
           <div><div class="text-2xl font-bold text-slate-900 tracking-tight">คิวที่ {{ queue.queue_no }}</div></div>
           {% if queue.status == 'waiting' %}
             <div class="bg-[#fff8e6] border border-[#fed7aa] rounded-lg px-4 py-3">
-              <div class="text-lg font-bold text-amber-800">ลำดับที่ {{ queue.position }} ในคิว <span class="text-xs font-normal text-amber-700">(รอจับคู่ทั้งหมด {{ queue.waiting_total }} คิว)</span></div>
-              <p class="text-xs text-amber-700 mt-1">เภสัชกรทุกคนกำลังให้คำปรึกษาอยู่ ระบบจะจับคู่ให้เองเมื่อมีเภสัชกรว่าง หน้านี้อัปเดตอัตโนมัติ</p>
+              <div class="text-lg font-bold text-amber-800">ลำดับที่ {{ queue.position }} ในคิว <span class="text-xs font-normal text-amber-700">(รอรับเคสทั้งหมด {{ queue.waiting_total }} คิว)</span></div>
+              <p class="text-xs text-amber-700 mt-1">รอเภสัชกรกดรับเคส หน้านี้อัปเดตอัตโนมัติและจะมีปุ่มเข้าห้องแชทเมื่อเภสัชกรรับเคสแล้ว</p>
             </div>
+            {% if queue.symptom_note %}
+            <div class="text-xs text-slate-600"><span class="font-medium text-slate-500">อาการเบื้องต้นที่แจ้งไว้:</span> <span class="whitespace-pre-wrap break-words">{{ queue.symptom_note }}</span></div>
+            {% endif %}
           {% else %}
             <div class="flex items-center justify-between text-xs text-slate-600 pb-1">
               <span>เภสัชกร: <span class="font-medium text-slate-800">ภก. {{ queue.pharmacist_name }}</span></span>
@@ -52,7 +55,9 @@
             <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">ยังไม่มีคิว</span>
           </div>
           <form method="post" action="{{ url_for('patient_request_consult', pid=patient.patient_id) }}">
-            <p class="text-xs text-slate-500 pb-3">กดปุ่มเดียว ระบบจะสร้างคิวและจับคู่เภสัชกรที่ว่างให้อัตโนมัติ</p>
+            <label class="block text-xs font-medium text-slate-600 mb-1" for="symptom_note">อาการเบื้องต้น <span class="font-normal text-slate-400">(ไม่บังคับ ไม่เกิน {{ symptom_note_max }} ตัวอักษร)</span></label>
+            <textarea class="w-full text-sm text-slate-700 leading-relaxed bg-white border border-slate-200 rounded-md px-2.5 py-2 focus:ring-teal-500 focus:border-teal-500 resize-none" id="symptom_note" name="symptom_note" rows="3" maxlength="{{ symptom_note_max }}" placeholder="เช่น ปวดหัว มีไข้ 2 วัน">{{ symptom_note }}</textarea>
+            <p class="text-xs text-slate-500 pt-1 pb-3">ระบบจะสร้างคิวให้ แล้วเภสัชกรจะเห็นอาการนี้และกดรับเคส</p>
             <button class="w-full inline-flex items-center justify-center bg-[#0d9488] hover:bg-[#0f766e] text-white font-medium py-3 px-4 rounded-lg shadow-sm transition-colors text-center text-sm" type="submit">ขอรับคำปรึกษา</button>
           </form>
         {% endif %}
@@ -91,7 +96,9 @@
           <div class="text-[11px] text-slate-500 mt-0.5">ภก. {{ r.pharmacist_name }}</div>
         </div>
         <div class="flex flex-col items-end">
-          {% if not r.order_id %}
+          {% if not r.order_id and r.rejected_count %}
+            <span class="px-3 py-1 bg-rose-100 text-rose-800 border border-rose-200 font-medium text-xs rounded">{{ 'rejected'|th }} · สั่งซื้อใหม่ได้</span>
+          {% elif not r.order_id %}
             <span class="px-3 py-1 bg-[#fb923c] text-white font-medium text-xs rounded shadow-sm">ยังไม่ได้สั่งซื้อ</span>
           {% else %}
             <span class="px-3 py-1 {{ 'bg-[#38bdf8]' if r.order_status == 'pending_payment' else 'bg-[#4ade80]' }} text-white font-medium text-xs rounded">{{ r.order_status|th }}</span>

@@ -2,34 +2,79 @@
 
 หลักการที่ใช้ทุกฟังก์ชัน
   1. หนึ่งฟังก์ชัน = หนึ่ง Transaction : สำเร็จทั้งหมดแล้ว COMMIT, ผิดพลาดจุดใดก็ ROLLBACK ทั้งหมด
+     (คำสั่งซื้อที่ระบบปฏิเสธ : ROLLBACK ก่อน แล้วบันทึกแถว orders สถานะ rejected ใน Transaction ใหม่)
   2. ใช้ bind variable (:ชื่อ) ทุก query ไม่ต่อสตริง SQL
   3. สร้าง id ด้วย SEQUENCE ใน DDL (seq_xxx.NEXTVAL) แล้วรับค่ากลับด้วย RETURNING ... INTO
 """
+import logging
+
 import oracledb
 
 import db
+
+log = logging.getLogger(__name__)
 
 
 class DemoError(Exception):
     """ข้อผิดพลาดทางธุรกิจ : ข้อความเป็นภาษาไทย ใช้แสดงบนหน้าจอได้เลย"""
 
 
-def _run(work):
-    """ครอบ Transaction : เรียก work(cur) แล้ว COMMIT, ถ้ามี error ใด ๆ ให้ ROLLBACK ทั้งหมด"""
+class RejectedError(DemoError):
+    """ระบบปฏิเสธรายการเอง (สต็อกไม่พอ หรือฐานข้อมูลปฏิเสธ เช่น ผิด CHECK / UNIQUE / FK)
+    ต่างจาก DemoError ทั่วไปที่เกิดจากการกรอกข้อมูล (ที่อยู่ว่าง, ไม่พบใบสั่งยา, สั่งซ้ำ)
+    ตรงที่ _run() จะบันทึกร่องรอยเป็นคำสั่งซื้อสถานะ rejected ให้
+    rejected_order_id = เลขที่คำสั่งซื้อ rejected ที่บันทึกได้ (None ถ้าไม่ได้บันทึก)"""
+    rejected_order_id = None
+
+
+def _run(work, rejected_order=None):
+    """ครอบ Transaction : เรียก work(cur) แล้ว COMMIT, ถ้ามี error ใด ๆ ให้ ROLLBACK ทั้งหมด
+    rejected_order = (patient_id, prescription_id, shipping_address) ส่งมาเฉพาะจาก place_order :
+    ถ้าระบบปฏิเสธ (RejectedError) ให้บันทึกร่องรอยเป็น orders สถานะ rejected หลัง ROLLBACK"""
     conn = db.connect()
     try:
         with conn.cursor() as cur:
             result = work(cur)
         conn.commit()          # COMMIT : ทุกคำสั่งใน work() มีผลพร้อมกัน
         return result
-    except DemoError:
+    except DemoError as exc:
         conn.rollback()        # ROLLBACK : ยกเลิกทุกคำสั่งที่ทำไปแล้วใน Transaction นี้
+        if isinstance(exc, RejectedError):
+            _record_rejected_order(exc, rejected_order)
         raise
     except oracledb.Error as exc:
         conn.rollback()        # error จากฐานข้อมูล (เช่น ผิด CHECK / UNIQUE / FK) ก็ ROLLBACK เช่นกัน
-        raise DemoError(f"ฐานข้อมูลปฏิเสธรายการ ระบบยกเลิกทั้งหมดแล้ว ({exc})") from exc
+        error = RejectedError(f"ฐานข้อมูลปฏิเสธรายการ ระบบยกเลิกทั้งหมดแล้ว ({exc})")
+        _record_rejected_order(error, rejected_order)
+        raise error from exc
     finally:
         conn.close()           # คืน connection ให้ pool
+
+
+def _record_rejected_order(error, rejected_order):
+    """บันทึกร่องรอยคำสั่งซื้อที่ระบบปฏิเสธ : Transaction ใหม่บน connection ใหม่ (งานหลักถูก ROLLBACK ไปแล้ว)
+    INSERT orders แถวเดียว สถานะ rejected แล้ว COMMIT  ไม่มี order_detail และไม่ตัดสต็อก
+    ถ้าบันทึกไม่สำเร็จ : log ไว้ แล้วปล่อยให้ผู้เรียก raise error เดิมต่อ (ไม่กลบ error เดิม)"""
+    if rejected_order is None:
+        return
+    patient_id, prescription_id, shipping_address = rejected_order
+    try:
+        conn = db.connect()
+        try:
+            with conn.cursor() as cur:
+                order_id_var = cur.var(int)
+                cur.execute("""
+                    INSERT INTO orders (order_id, patient_id, prescription_id, status, shipping_address)
+                    VALUES (seq_orders.NEXTVAL, :patient_id, :rx_id, 'rejected', :shipping_address)
+                    RETURNING order_id INTO :order_id""",
+                    patient_id=patient_id, rx_id=prescription_id, shipping_address=shipping_address,
+                    order_id=order_id_var)
+            conn.commit()
+            error.rejected_order_id = order_id_var.getvalue()[0]
+        finally:
+            conn.close()
+    except oracledb.Error:
+        log.exception("บันทึกคำสั่งซื้อ rejected ไม่สำเร็จ (ใบสั่งยา %s) : %s", prescription_id, error)
 
 
 # ---------------------------------------------------------------------
@@ -83,79 +128,27 @@ TIMEOUT_MESSAGE = {
 
 
 # ---------------------------------------------------------------------
-# คิวและการจับคู่
-#   MAX_OPEN_CHATS = จำนวนห้องแชท open (รอตอบกลับ/ระหว่างปรึกษา) ที่เภสัชกร 1 คนถือพร้อมกันได้
-#   ถ้าเภสัชกรทุกคนเต็ม คิวจะค้างที่ waiting (รอจับคู่) จนกว่าจะมีห้องถูกปิดหรือหมดเวลา
+# คิวปรึกษา : คนไข้เข้าคิว (waiting) แล้วเภสัชกรเลือก "รับเคส" เองจากรายการรอ
+#   เภสัชกร 1 คนรับได้หลายเคสพร้อมกัน (ถือห้องแชท open ได้หลายห้อง)
 #   ลำดับในคิว (QUEUE_ORDER_SQL) : VIP ก่อนสมาชิกทั่วไป แล้วตามเวลาที่เข้าคิว
 #   ใช้ใน SELECT ที่ตั้ง alias consult_queue เป็น q
 # ---------------------------------------------------------------------
-MAX_OPEN_CHATS = 1
-
 QUEUE_ORDER_SQL = "CASE q.member_type WHEN 'vip' THEN 0 ELSE 1 END, q.entered_at, q.queue_id"
 
-
-def _match_waiting(cur, pharmacy_id):
-    """จับคู่คิวที่รอ (waiting) กับเภสัชกรที่ว่าง วนจนกว่าคิวหมดหรือเภสัชกรเต็มทุกคน
-    เรียกภายใน Transaction ของผู้เรียก (ขอคำปรึกษา / ปิดห้อง / หมดเวลา) จึง COMMIT/ROLLBACK พร้อมกัน
-    คืนจำนวนคิวที่จับคู่ได้"""
-    # ล็อกแถวร้านยา : ให้การจับคู่ของร้านเดียวกันทำทีละ Transaction
-    # กันสองคำขอพร้อมกันเลือกเภสัชกรคนเดียวกันจนเกิน MAX_OPEN_CHATS
-    cur.execute("SELECT pharmacy_id FROM pharmacy WHERE pharmacy_id = :pharmacy_id FOR UPDATE",
-                pharmacy_id=pharmacy_id)
-    matched = 0
-    while True:
-        # (ก) คิวถัดไป : VIP ก่อน แล้วตามเวลาเข้าคิว
-        cur.execute(f"""
-            SELECT q.queue_id
-            FROM   consult_queue q
-            WHERE  q.pharmacy_id = :pharmacy_id AND q.status = 'waiting'
-            ORDER  BY {QUEUE_ORDER_SQL}
-            FETCH FIRST 1 ROW ONLY""", pharmacy_id=pharmacy_id)
-        row = cur.fetchone()
-        if row is None:
-            return matched                  # ไม่มีคิวรอแล้ว
-        queue_id = row[0]
-
-        # (ข) เภสัชกรที่ว่าง : ถือห้อง open น้อยกว่า MAX_OPEN_CHATS
-        #     เลือกคนที่ถือน้อยที่สุด ถ้าเท่ากันเลือกคนที่ได้ห้องล่าสุดนานที่สุด
-        cur.execute("""
-            SELECT f.pharmacist_id
-            FROM   pharmacist f
-            WHERE  f.pharmacy_id = :pharmacy_id AND f.deleted_at IS NULL
-            AND    (SELECT COUNT(*) FROM chat_room c
-                    WHERE  c.pharmacist_id = f.pharmacist_id AND c.status = 'open') < :max_open
-            ORDER  BY (SELECT COUNT(*) FROM chat_room c
-                       WHERE  c.pharmacist_id = f.pharmacist_id AND c.status = 'open'),
-                      (SELECT MAX(c.started_at) FROM chat_room c
-                       WHERE  c.pharmacist_id = f.pharmacist_id) NULLS FIRST,
-                      f.pharmacist_id
-            FETCH FIRST 1 ROW ONLY""", pharmacy_id=pharmacy_id, max_open=MAX_OPEN_CHATS)
-        row = cur.fetchone()
-        if row is None:
-            return matched                  # เภสัชกรเต็มทุกคน : คิวที่เหลือรอต่อ (รอจับคู่)
-        pharmacist_id = row[0]
-
-        # (ค) สร้างห้องแชท : คิว 1 - 1 ห้องแชท (uq_chat_queue)
-        #     status = open และเภสัชกรยังไม่มีข้อความ = "รอตอบกลับ"
-        #     started_at = เวลาที่จับคู่ ตัวนับ 10 นาทีของเภสัชกรจึงเริ่มตอนได้ห้อง ไม่ใช่ตอนเข้าคิว
-        cur.execute("""
-            INSERT INTO chat_room (chat_id, queue_id, pharmacist_id, status)
-            VALUES (seq_chat_room.NEXTVAL, :queue_id, :pharmacist_id, 'open')""",
-            queue_id=queue_id, pharmacist_id=pharmacist_id)
-
-        # (ง) คิวจับคู่แล้ว : waiting -> in_progress
-        cur.execute("""
-            UPDATE consult_queue SET status = 'in_progress', updated_at = CURRENT_TIMESTAMP
-            WHERE  queue_id = :queue_id AND status = 'waiting'""", queue_id=queue_id)
-        matched += 1
+SYMPTOM_NOTE_MAX = 500
+CLAIM_TAKEN = "เคสนี้มีเภสัชกรท่านอื่นรับไปแล้ว"
 
 
 # ---------------------------------------------------------------------
-# 1) คนไข้กด "ขอรับคำปรึกษา" ปุ่มเดียว  (Transaction เดียว)
-#    INSERT consult_queue (waiting = รอจับคู่) -> จับคู่ทันทีถ้ามีเภสัชกรว่าง
-#    ถ้าเภสัชกรเต็มทุกคน คิวค้างที่ waiting และยังไม่มีห้องแชท
+# 1) คนไข้กด "ขอรับคำปรึกษา"  (Transaction เดียว)
+#    INSERT consult_queue สถานะ waiting พร้อมอาการเบื้องต้น (symptom_note ว่างได้)
+#    ยังไม่มีห้องแชท จนกว่าเภสัชกรจะกด "รับเคส" (claim_queue)
 # ---------------------------------------------------------------------
-def request_consult(patient_id):
+def request_consult(patient_id, symptom_note=None):
+    symptom_note = (symptom_note or "").strip() or None
+    if symptom_note and len(symptom_note) > SYMPTOM_NOTE_MAX:
+        raise DemoError(f"อาการเบื้องต้นยาวเกิน {SYMPTOM_NOTE_MAX} ตัวอักษร")
+
     def work(cur):
         # คนไข้ 1 คนมีคิวที่ยังไม่จบได้ครั้งละ 1 คิว
         cur.execute("""
@@ -171,21 +164,54 @@ def request_consult(patient_id):
         if pharmacy_id is None:
             raise DemoError("ขณะนี้ร้านยาปิดให้บริการ")
 
-        # สร้างคิว สถานะ waiting = รอจับคู่
+        # สร้างคิว สถานะ waiting = รอเภสัชกรรับเคส
         # queue_no = ลำดับคิวของร้านในวันนี้, member_type ใส่ตาม patient.is_vip (ใช้จัดลำดับ VIP ก่อน)
         cur.execute("""
-            INSERT INTO consult_queue (queue_id, patient_id, pharmacy_id, queue_no, member_type, status)
+            INSERT INTO consult_queue (queue_id, patient_id, pharmacy_id, queue_no, member_type, status,
+                                       symptom_note)
             VALUES (seq_consult_queue.NEXTVAL, :patient_id, :pharmacy_id,
                     (SELECT NVL(MAX(q.queue_no), 0) + 1
                      FROM   consult_queue q
                      WHERE  q.pharmacy_id = :pharmacy_id AND q.entered_at >= TRUNC(SYSDATE)),
                     (SELECT CASE p.is_vip WHEN 1 THEN 'vip' ELSE 'general' END
                      FROM   patient p WHERE p.patient_id = :patient_id),
-                    'waiting')""",
-            patient_id=patient_id, pharmacy_id=pharmacy_id)
+                    'waiting', :symptom_note)""",
+            patient_id=patient_id, pharmacy_id=pharmacy_id, symptom_note=symptom_note)
 
-        # จับคู่ทันที (ถ้ามีคิวอื่นรออยู่ก่อน คิวนั้นได้ก่อนตามลำดับ)
-        _match_waiting(cur, pharmacy_id)
+    return _run(work)
+
+
+# ---------------------------------------------------------------------
+# 1.1) เภสัชกรกด "รับเคส"  (Transaction เดียว)
+#      INSERT chat_room -> UPDATE consult_queue เป็น in_progress  สำเร็จหรือยกเลิกพร้อมกัน
+#      ถ้าเภสัชกร 2 คนกดรับเคสเดียวกันพร้อมกัน : uq_chat_queue (คิว 1 - 1 ห้องแชท) ให้ผ่านคนเดียว
+#      อีกคนได้ ORA-00001 -> แจ้ง "เคสนี้มีเภสัชกรท่านอื่นรับไปแล้ว"
+#      คืน chat_id ของห้องที่สร้าง
+# ---------------------------------------------------------------------
+def claim_queue(pharmacist_id, queue_id):
+    def work(cur):
+        # (1) สร้างห้องแชท : status = open และเภสัชกรยังไม่มีข้อความ = "รอตอบกลับ"
+        #     started_at = เวลาที่รับเคส ตัวนับ 10 นาทีของเภสัชกรจึงเริ่มตอนรับเคส ไม่ใช่ตอนเข้าคิว
+        chat_id_var = cur.var(int)
+        try:
+            cur.execute("""
+                INSERT INTO chat_room (chat_id, queue_id, pharmacist_id, status)
+                VALUES (seq_chat_room.NEXTVAL, :queue_id, :pharmacist_id, 'open')
+                RETURNING chat_id INTO :chat_id""",
+                queue_id=queue_id, pharmacist_id=pharmacist_id, chat_id=chat_id_var)
+        except oracledb.IntegrityError as exc:
+            if exc.args[0].code == 1:           # ORA-00001 : คิวนี้มีห้องแชทแล้ว (uq_chat_queue)
+                raise DemoError(CLAIM_TAKEN) from exc
+            raise
+
+        # (2) คิว waiting -> in_progress : เงื่อนไข status = 'waiting' อยู่ใน UPDATE เดียวกัน
+        #     ถ้าคิวไม่ได้รออยู่แล้ว จะไม่มีแถวถูกแก้ (SQL%ROWCOUNT = 0) -> ROLLBACK ห้องที่เพิ่งสร้าง
+        cur.execute("""
+            UPDATE consult_queue SET status = 'in_progress', updated_at = CURRENT_TIMESTAMP
+            WHERE  queue_id = :queue_id AND status = 'waiting'""", queue_id=queue_id)
+        if cur.rowcount == 0:
+            raise DemoError(CLAIM_TAKEN)
+        return chat_id_var.getvalue()[0]
 
     return _run(work)
 
@@ -193,7 +219,6 @@ def request_consult(patient_id):
 # ---------------------------------------------------------------------
 # 2) เภสัชกรกด "ปิดห้องแชท" -> chat_room = closed, consult_queue = completed
 #    ปิดได้เมื่อเภสัชกรตอบคนไข้แล้วอย่างน้อย 1 ข้อความ (สถานะ ระหว่างปรึกษา)
-#    เภสัชกรว่างลง -> จับคู่คิวที่รอคนถัดไปให้ทันที ใน Transaction เดียวกัน
 # ---------------------------------------------------------------------
 def close_chat(pharmacist_id, chat_id):
     def work(cur):
@@ -207,21 +232,16 @@ def close_chat(pharmacist_id, chat_id):
         if cur.rowcount == 0:
             raise DemoError("ปิดห้องแชทไม่ได้: ห้องนี้ปิดไปแล้ว หรือคุณยังไม่ได้ตอบคนไข้")
 
-        pharmacy_id_var = cur.var(int)
         cur.execute("""
             UPDATE consult_queue SET status = 'completed', updated_at = CURRENT_TIMESTAMP
-            WHERE  queue_id = (SELECT queue_id FROM chat_room WHERE chat_id = :chat_id)
-            RETURNING pharmacy_id INTO :pharmacy_id""",
-            chat_id=chat_id, pharmacy_id=pharmacy_id_var)
-
-        # ห้องปิด + คิวถัดไปได้ห้อง สำเร็จหรือยกเลิกพร้อมกัน
-        _match_waiting(cur, pharmacy_id_var.getvalue()[0])
+            WHERE  queue_id = (SELECT queue_id FROM chat_room WHERE chat_id = :chat_id)""",
+            chat_id=chat_id)
 
     return _run(work)
 
 
 # ---------------------------------------------------------------------
-# 2.1) หมดเวลาตอบกลับ -> ปิดห้อง แล้วจับคู่คิวที่รอคนถัดไป (Transaction เดียวกัน)
+# 2.1) หมดเวลาตอบกลับ -> ปิดห้อง (ห้องและคิวเปลี่ยนสถานะใน Transaction เดียวกัน)
 #      เภสัชกรไม่ตอบภายใน 10 นาที : chat_room = closed, consult_queue = cancelled (ให้คำปรึกษาไม่สำเร็จ)
 #      คนไข้ไม่ตอบภายใน 5 นาที    : chat_room = closed, consult_queue = completed (ปิดห้องแชทแล้ว)
 # ---------------------------------------------------------------------
@@ -243,18 +263,14 @@ def _lock_open_rooms(cur, chat_id=None):
 
 
 def _close_timed_out(cur, chat_id, queue_id, turn):
-    """ปิดห้องที่หมดเวลา : สถานะคิวขึ้นกับว่าฝ่ายไหนไม่ตอบ  คืน pharmacy_id ของคิว"""
+    """ปิดห้องที่หมดเวลา : สถานะคิวขึ้นกับว่าฝ่ายไหนไม่ตอบ"""
     cur.execute("""
         UPDATE chat_room SET status = 'closed', updated_at = CURRENT_TIMESTAMP
         WHERE  chat_id = :chat_id""", chat_id=chat_id)
-    pharmacy_id_var = cur.var(int)
     cur.execute("""
         UPDATE consult_queue SET status = :status, updated_at = CURRENT_TIMESTAMP
-        WHERE  queue_id = :queue_id
-        RETURNING pharmacy_id INTO :pharmacy_id""",
-        status="cancelled" if turn == "pharmacist" else "completed",
-        queue_id=queue_id, pharmacy_id=pharmacy_id_var)
-    return pharmacy_id_var.getvalue()[0]
+        WHERE  queue_id = :queue_id""",
+        status="cancelled" if turn == "pharmacist" else "completed", queue_id=queue_id)
 
 
 def expire_overdue(chat_id=None, side=None):
@@ -262,16 +278,12 @@ def expire_overdue(chat_id=None, side=None):
     ส่ง chat_id + side : ปุ่มทดสอบ "หมดเวลา" ถือว่าฝ่าย side หมดเวลาทันที (ได้ผลเมื่อเป็นตาของฝ่ายนั้น)
     คืนจำนวนห้องที่ถูกปิด"""
     def work(cur):
-        pharmacy_ids = set()
         closed = 0
         for room_id, queue_id, turn, seconds_left in _lock_open_rooms(cur, chat_id):
             overdue = (turn == side) if chat_id is not None else (seconds_left <= 0)
             if overdue:
-                pharmacy_ids.add(_close_timed_out(cur, room_id, queue_id, turn))
+                _close_timed_out(cur, room_id, queue_id, turn)
                 closed += 1
-        # เภสัชกรว่างลง -> จับคู่คิวที่รอคนถัดไป (สำเร็จหรือยกเลิกพร้อมกับการปิดห้อง)
-        for pharmacy_id in sorted(pharmacy_ids):
-            _match_waiting(cur, pharmacy_id)
         return closed
 
     return _run(work)
@@ -291,9 +303,9 @@ def send_message(chat_id, sender_type, content):
         _, queue_id, turn, seconds_left = rooms[0]
 
         if seconds_left <= 0:
-            # หมดเวลาแล้ว : ปิดห้อง + จับคู่คิวถัดไป แล้ว COMMIT (คืนข้อความปฏิเสธแทนการ raise
+            # หมดเวลาแล้ว : ปิดห้อง แล้ว COMMIT (คืนข้อความปฏิเสธแทนการ raise
             # เพราะ raise จะทำให้ _run() ROLLBACK การปิดห้องไปด้วย)
-            _match_waiting(cur, _close_timed_out(cur, chat_id, queue_id, turn))
+            _close_timed_out(cur, chat_id, queue_id, turn)
             return TIMEOUT_MESSAGE[turn]
 
         cur.execute("""
@@ -311,7 +323,7 @@ def send_message(chat_id, sender_type, content):
 # 4) เภสัชกรออกใบสั่งยา -> prescription + prescription_detail
 #    ออกได้ขณะห้องแชทยังเปิด (ก่อนกดปิดห้องแชท) ห้องละ 1 ใบ
 #    ตรงนี้กันแค่ยาที่คงเหลือรวม 0 (หมด) ไม่เทียบจำนวนที่สั่งกับคงเหลือ
-#    การกันสต็อกตัวหลักอยู่ที่ place_order ตอนคนไข้สั่งซื้อ (เกินสต็อก -> ROLLBACK ทั้งคำสั่งซื้อ)
+#    การกันสต็อกตัวหลักอยู่ที่ place_order ตอนคนไข้สั่งซื้อ (เกินสต็อก -> ROLLBACK ทั้งคำสั่งซื้อ + บันทึก rejected)
 #    items = [{"drug_id", "strength", "dosage", "usage_note", "quantity"}, ...]
 # ---------------------------------------------------------------------
 def issue_prescription(pharmacist_id, chat_id, items):
@@ -392,7 +404,8 @@ def issue_prescription(pharmacist_id, chat_id, items):
 # ---------------------------------------------------------------------
 # 5) คนไข้สั่งซื้อตามใบสั่งยา  ** Transaction หลักของ Demo **
 #    INSERT orders + order_detail และ UPDATE drug_batch (ตัดสต็อก) ต้องสำเร็จพร้อมกันทั้งหมด
-#    ถ้ายารายการใดสต็อกไม่พอ -> ROLLBACK ทั้งคำสั่งซื้อ ข้อมูลในฐานข้อมูลไม่เปลี่ยน
+#    ถ้ายารายการใดสต็อกไม่พอ -> ROLLBACK ทั้งคำสั่งซื้อ สต็อกไม่เปลี่ยน
+#    แล้ว _run() บันทึกร่องรอยเป็น orders สถานะ rejected 1 แถว (ไม่มี order_detail)
 # ---------------------------------------------------------------------
 def place_order(patient_id, prescription_id, shipping_address):
     shipping_address = (shipping_address or "").strip()
@@ -416,7 +429,10 @@ def place_order(patient_id, prescription_id, shipping_address):
             raise DemoError("ไม่พบใบสั่งยานี้")
 
         # ใบสั่งยา 1 - 1 คำสั่งซื้อ (uq_orders_prescription) : ตรวจก่อนเพื่อให้ข้อความอ่านง่าย
-        cur.execute("SELECT COUNT(*) FROM orders WHERE prescription_id = :rx_id", rx_id=prescription_id)
+        # ไม่นับคำสั่งซื้อที่ถูกปฏิเสธ (rejected) : ใบสั่งยาที่เคยถูกปฏิเสธสั่งซื้อใหม่ได้
+        cur.execute("""
+            SELECT COUNT(*) FROM orders
+            WHERE  prescription_id = :rx_id AND status <> 'rejected'""", rx_id=prescription_id)
         if cur.fetchone()[0] > 0:
             raise DemoError("ใบสั่งยานี้ถูกสั่งซื้อไปแล้ว")
 
@@ -480,7 +496,7 @@ def place_order(patient_id, prescription_id, shipping_address):
 
         return order_id
 
-    return _run(work)
+    return _run(work, rejected_order=(patient_id, prescription_id, shipping_address))
 
 
 def _raise_out_of_stock(cur, drug_id, drug_name, quantity, wanted, taken):
@@ -489,7 +505,7 @@ def _raise_out_of_stock(cur, drug_id, drug_name, quantity, wanted, taken):
     taken = จำนวนที่ Transaction นี้หักไปแล้ว (บวกคืนเพื่อให้ได้คงเหลือก่อนสั่งซื้อ ตรงกับที่หน้าจอแสดง)
       - คงเหลือรวมไม่พอ                 -> "คงเหลือ N สั่ง Q ไม่ได้"
       - คงเหลือรวมพอ แต่ล็อตเดียวไม่พอ -> "ไม่มีล็อตเดียวที่มีจำนวนพอ" (จ่ายจากล็อตเดียวต่อรายการ)
-    การ raise ตรงนี้ทำให้ _run() ROLLBACK ทั้ง Transaction"""
+    การ raise ตรงนี้ทำให้ _run() ROLLBACK ทั้ง Transaction แล้วบันทึกคำสั่งซื้อสถานะ rejected"""
     cur.execute("""
         SELECT NVL(SUM(b.quantity), 0), NVL(MAX(b.quantity), 0)
         FROM   drug_batch b
@@ -502,7 +518,7 @@ def _raise_out_of_stock(cur, drug_id, drug_name, quantity, wanted, taken):
     else:
         reason = (f"{drug_name} คงเหลือรวม {total} แต่ไม่มีล็อตเดียวที่มีจำนวนพอสำหรับ {quantity} "
                   f"(ล็อตที่มากที่สุดมี {largest_lot})")
-    raise DemoError(f"{reason} ระบบไม่สร้างคำสั่งซื้อและคืนสต็อกทั้งหมดแล้ว")
+    raise RejectedError(f"สต็อกไม่พอ: {reason} ระบบยกเลิกคำสั่งซื้อและคืนสต็อกทั้งหมดแล้ว")
 
 
 # ---------------------------------------------------------------------
@@ -533,6 +549,8 @@ def pay_order(patient_id, order_id, method, bank_name=None):
         if row is None:
             raise DemoError("ไม่พบคำสั่งซื้อนี้")
         status, patient_name, pharmacy_id, pharmacy_name, amount = row
+        if status == "rejected":
+            raise DemoError("คำสั่งซื้อนี้ถูกปฏิเสธ ชำระเงินไม่ได้")
         if status != "pending_payment":
             raise DemoError("คำสั่งซื้อนี้ชำระเงินแล้ว")
 
